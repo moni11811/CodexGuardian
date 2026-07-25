@@ -26,6 +26,8 @@ Then restart Codex once. A shield appears in your Mac menu bar when Guardian is 
 
 If you are a developer or need help connecting Guardian, see [Technical Setup](TECHNICAL_SETUP.md).
 
+The included [Codex instructions](AGENTS.md) tell Codex to call Guardian itself when recovery is genuinely needed. You should not have to restart Codex manually.
+
 ## Is it safe?
 
 Guardian only restarts Codex when it can prove which task asked for help. If it cannot prove that, it stops instead.

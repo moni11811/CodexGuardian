@@ -18,5 +18,10 @@ OUTPUT="$({
 grep -q '"name":"codex-guardian"' <<<"$OUTPUT"
 grep -q '"name":"restart_codex"' <<<"$OUTPUT"
 grep -q '"origin_token"' <<<"$OUTPUT"
-grep -q '"required":\["origin_token","recovery_prompt"\]' <<<"$OUTPUT"
+grep -q '"required":\["origin_token"\]' <<<"$OUTPUT"
+grep -q 'sanitized recent task state' <<<"$OUTPUT"
+if grep -q '"required":\["origin_token","recovery_prompt"\]' <<<"$OUTPUT"; then
+  echo "MCP still requires a manually written recovery prompt" >&2
+  exit 1
+fi
 echo "MCP smoke test passed"
