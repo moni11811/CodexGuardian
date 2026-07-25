@@ -62,7 +62,7 @@ private func handle(_ message: [String: Any]) {
     case "tools/list":
         result(id: id, value: ["tools": [[
             "name": "restart_codex",
-            "description": "Restart Codex after this call returns, then resume the exact originating task. Generate a fresh UUID for origin_token on every call. Use after a tool is genuinely stuck; do not repeat an unchanged failed method after recovery.",
+            "description": "Restart Codex after this call returns, then reopen the exact originating desktop task and copy its recovery prompt. Generate a fresh UUID for origin_token on every call.",
             "inputSchema": [
                 "type": "object",
                 "properties": [
@@ -115,7 +115,7 @@ private func handle(_ message: [String: Any]) {
             result(id: id, value: [
                 "content": [[
                     "type": "text",
-                    "text": "Codex restart scheduled in \(request.delaySeconds) seconds. Exact task \(origin.threadID) queued. Guardian will create a private on-device continuation prompt from its sanitized recent state.",
+                    "text": "Codex restart scheduled in \(request.delaySeconds) seconds. Guardian will reopen exact task \(origin.threadID) and copy a private on-device recovery prompt. Detached CLI continuation is disabled to prevent access prompts.",
                 ]],
                 "isError": false,
             ])

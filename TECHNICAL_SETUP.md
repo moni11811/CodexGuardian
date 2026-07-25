@@ -43,7 +43,7 @@ restart_codex(
 )
 ```
 
-Guardian locates the rollout containing `origin_token`, extracts the exact task ID, queues concurrent recovery requests, restarts Codex once, and starts `codex exec resume <TASK_ID> <PROMPT>` for every queued task. If the origin cannot be proven, the MCP call fails without restarting Codex.
+Guardian locates the rollout containing `origin_token`, extracts the exact task ID, queues concurrent recovery requests, restarts Codex once, and opens `codex://threads/<TASK_ID>`. It never launches detached `codex exec resume` workers. If the origin cannot be proven, the MCP call fails without restarting Codex.
 
 ## Smart recovery
 

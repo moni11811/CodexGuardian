@@ -110,41 +110,18 @@ final class AppModel: ObservableObject {
                 plan: launchPlan,
                 resolvedApplicationURL: resolvedApplicationURL
             ) ?? false
-            let resumable = requests.filter { !$0.threadID.isEmpty }
-            let startupPolicy = CodexRecoveryStartupPolicy()
-            var resumed = 0
-            if startupPolicy.shouldStartContinuation(desktopIsRunning: didLaunch) {
-                try? await Task.sleep(for: .seconds(startupPolicy.continuationDelaySeconds))
-                resumed = resumable.filter { self?.startContinuation(for: $0) == true }.count
+            var openedTask = false
+            if didLaunch, !request.threadID.isEmpty {
+                openedTask = self?.runOpen(arguments: [
+                    CodexThreadDeepLink(threadID: request.threadID).url.absoluteString,
+                ]) ?? false
             }
             self?.status = didLaunch
-                ? "Codex relaunched; continuing \(resumed)/\(resumable.count) tasks"
+                ? (openedTask
+                    ? "Codex relaunched; exact task opened; prompt copied"
+                    : "Codex relaunched; prompt copied")
                 : "Relaunch failed: Codex application not found"
             self?.recoveryInProgress = false
-        }
-    }
-
-    private func startContinuation(for request: RestartRequest) -> Bool {
-        let candidates = [
-            "/Applications/ChatGPT.app/Contents/Resources/codex",
-            "/Applications/Codex.app/Contents/Resources/codex",
-        ]
-        guard let executable = candidates.first(where: FileManager.default.fileExists(atPath:)) else {
-            return false
-        }
-
-        let logs = store.directory.appending(path: "logs", directoryHint: .isDirectory)
-        do {
-            try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
-            let logURL = logs.appending(path: "\(request.id.uuidString).jsonl")
-            _ = try CodexContinuationLauncher().start(
-                request: request,
-                executableURL: URL(fileURLWithPath: executable),
-                logURL: logURL
-            )
-            return true
-        } catch {
-            return false
         }
     }
 

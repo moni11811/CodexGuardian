@@ -21,3 +21,9 @@ import Testing
     #expect(!policy.shouldStartContinuation(desktopIsRunning: false))
     #expect(policy.shouldStartContinuation(desktopIsRunning: true))
 }
+
+@Test func recoveryDeepLinkTargetsExactDesktopThread() {
+    let link = CodexThreadDeepLink(threadID: "019f0000-0000-7000-8000-000000000002")
+
+    #expect(link.url.absoluteString == "codex://threads/019f0000-0000-7000-8000-000000000002")
+}
