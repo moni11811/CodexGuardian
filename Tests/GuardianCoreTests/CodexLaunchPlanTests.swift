@@ -14,3 +14,10 @@ import Testing
     #expect(!policy.isRecovered(openSucceeded: true, applicationIsRunning: false))
     #expect(policy.isRecovered(openSucceeded: true, applicationIsRunning: true))
 }
+
+@Test func continuationWaitsForVerifiedDesktopRelaunch() {
+    let policy = CodexRecoveryStartupPolicy()
+
+    #expect(!policy.shouldStartContinuation(desktopIsRunning: false))
+    #expect(policy.shouldStartContinuation(desktopIsRunning: true))
+}

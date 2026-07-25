@@ -27,12 +27,15 @@ import Testing
     let directory = FileManager.default.temporaryDirectory
         .appending(path: UUID().uuidString, directoryHint: .isDirectory)
     let store = RestartRequestStore(directory: directory)
+    let firstRequestedAt = Date(timeIntervalSince1970: 1_000)
     let first = RestartRequest(
+        requestedAt: firstRequestedAt,
         threadID: "019f0000-0000-7000-8000-000000000001",
         recoveryPrompt: "Continue first task",
         delaySeconds: 2
     )
     let second = RestartRequest(
+        requestedAt: firstRequestedAt.addingTimeInterval(1),
         threadID: "019f0000-0000-7000-8000-000000000002",
         recoveryPrompt: "Continue second task",
         delaySeconds: 2

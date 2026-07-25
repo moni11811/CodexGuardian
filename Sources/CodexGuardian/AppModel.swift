@@ -106,12 +106,17 @@ final class AppModel: ObservableObject {
                 try? await Task.sleep(for: .milliseconds(250))
             }
 
-            let resumable = requests.filter { !$0.threadID.isEmpty }
-            let resumed = resumable.filter { self?.startContinuation(for: $0) == true }.count
             let didLaunch = await self?.launchCodex(
                 plan: launchPlan,
                 resolvedApplicationURL: resolvedApplicationURL
             ) ?? false
+            let resumable = requests.filter { !$0.threadID.isEmpty }
+            let startupPolicy = CodexRecoveryStartupPolicy()
+            var resumed = 0
+            if startupPolicy.shouldStartContinuation(desktopIsRunning: didLaunch) {
+                try? await Task.sleep(for: .seconds(startupPolicy.continuationDelaySeconds))
+                resumed = resumable.filter { self?.startContinuation(for: $0) == true }.count
+            }
             self?.status = didLaunch
                 ? "Codex relaunched; continuing \(resumed)/\(resumable.count) tasks"
                 : "Relaunch failed: Codex application not found"
