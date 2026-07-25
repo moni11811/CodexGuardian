@@ -9,7 +9,8 @@ Sometimes an AI task freezes. Normally, you must reopen Codex, find the task, an
 1. Codex notices that it is stuck.
 2. Codex asks Guardian for help.
 3. Guardian safely restarts Codex.
-4. Guardian returns to the correct task and tells it to continue with a different approach.
+4. Your Mac's private built-in AI reads a small, cleaned-up summary of what happened.
+5. Guardian returns to the correct task with a useful “continue from here” message.
 
 It can also queue several stuck tasks, so one task does not replace another.
 
@@ -28,6 +29,8 @@ If you are a developer or need help connecting Guardian, see [Technical Setup](T
 ## Is it safe?
 
 Guardian only restarts Codex when it can prove which task asked for help. If it cannot prove that, it stops instead.
+
+On supported Macs, the smart recovery message is created locally with Apple Intelligence. Guardian removes common secret patterns first and never sends this summary to an online AI service. If the local model is unavailable, Guardian uses a simple safe message instead.
 
 The project contains no API keys or accounts. Keep your own secrets out of bug reports and contributions.
 

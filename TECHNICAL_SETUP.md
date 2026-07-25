@@ -45,6 +45,12 @@ restart_codex(
 
 Guardian locates the rollout containing `origin_token`, extracts the exact task ID, queues concurrent recovery requests, restarts Codex once, and starts `codex exec resume <TASK_ID> <PROMPT>` for every queued task. If the origin cannot be proven, the MCP call fails without restarting Codex.
 
+## Smart recovery
+
+On macOS 26 or newer, Guardian uses Apple's Foundation Models framework when the on-device model is available. It extracts at most 6,000 characters from the recent rollout tail, removes the origin marker and common credential/path patterns, and asks the local model for a concise continuation prompt. It falls back to `recovery_prompt` or Guardian's built-in prompt when the model is unavailable or generation fails.
+
+The MCP client only needs to provide a fresh `origin_token`; `recovery_prompt` is now an optional fallback.
+
 ## Local signing
 
 The installer uses ad-hoc signing for local use. Redistributable binaries require Developer ID signing and Apple notarization.

@@ -37,11 +37,36 @@ final class AppModel: ObservableObject {
             Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(first.delaySeconds))
                 let laterRequests = (try? self?.store.takeAllPending()) ?? []
-                self?.restartCodex(using: requests + laterRequests)
+                guard let self else { return }
+                let prepared = await self.prepareRecoveryPrompts(for: requests + laterRequests)
+                self.restartCodex(using: prepared)
             }
         } catch {
             status = "Invalid request: \(error.localizedDescription)"
         }
+    }
+
+    private func prepareRecoveryPrompts(for requests: [RestartRequest]) async -> [RestartRequest] {
+        var prepared: [RestartRequest] = []
+        for request in requests {
+            guard let snapshot = request.contextSnapshot, !snapshot.isEmpty else {
+                prepared.append(request)
+                continue
+            }
+#if canImport(FoundationModels)
+            if #available(macOS 26.0, *) {
+                status = "Understanding the last task state"
+                let prompt = await AppleRecoveryPromptGenerator().generate(
+                    snapshot: snapshot,
+                    fallback: request.recoveryPrompt
+                )
+                prepared.append(request.withRecoveryPrompt(prompt))
+                continue
+            }
+#endif
+            prepared.append(request)
+        }
+        return prepared
     }
 
     private func restartCodex(using requests: [RestartRequest]) {

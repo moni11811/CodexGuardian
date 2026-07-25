@@ -25,6 +25,10 @@ public struct ThreadOriginResolver: Sendable {
     }
 
     public func resolve(originToken: String) throws -> String {
+        try resolveRecoveryOrigin(originToken: originToken).threadID
+    }
+
+    public func resolveRecoveryOrigin(originToken: String) throws -> RecoveryOrigin {
         guard UUID(uuidString: originToken) != nil else {
             throw ThreadOriginResolverError.invalidToken
         }
@@ -34,7 +38,11 @@ public struct ThreadOriginResolver: Sendable {
                   let content = String(data: data, encoding: .utf8),
                   content.contains(originToken),
                   let threadID = threadID(from: content) else { continue }
-            return threadID
+            let snapshot = RecoveryContextExtractor().extract(
+                from: content,
+                originToken: originToken
+            )
+            return RecoveryOrigin(threadID: threadID, contextSnapshot: snapshot)
         }
         throw ThreadOriginResolverError.originNotFound
     }
@@ -64,5 +72,15 @@ public struct ThreadOriginResolver: Sendable {
             return payload["id"] as? String ?? payload["session_id"] as? String
         }
         return nil
+    }
+}
+
+public struct RecoveryOrigin: Equatable, Sendable {
+    public let threadID: String
+    public let contextSnapshot: String
+
+    public init(threadID: String, contextSnapshot: String) {
+        self.threadID = threadID
+        self.contextSnapshot = contextSnapshot
     }
 }

@@ -26,11 +26,11 @@ private func launchGuardianIfNeeded() {
     try? process.run()
 }
 
-private func resolveOriginThread(_ token: String) throws -> String {
+private func resolveOrigin(_ token: String) throws -> RecoveryOrigin {
     var lastError: Error = ThreadOriginResolverError.originNotFound
     for _ in 0..<20 {
         do {
-            return try originResolver.resolve(originToken: token)
+            return try originResolver.resolveRecoveryOrigin(originToken: token)
         } catch {
             lastError = error
             Thread.sleep(forTimeInterval: 0.1)
@@ -68,7 +68,7 @@ private func handle(_ message: [String: Any]) {
                 "properties": [
                     "recovery_prompt": [
                         "type": "string",
-                        "description": "Instructions sent to this exact task after restart. Include the failed tool symptom and the next fallback action.",
+                        "description": "Optional fallback instructions. Guardian uses the local Apple model to improve them from sanitized recent task state.",
                     ],
                     "origin_token": [
                         "type": "string",
@@ -82,7 +82,7 @@ private func handle(_ message: [String: Any]) {
                         "default": 2,
                     ],
                 ],
-                "required": ["origin_token", "recovery_prompt"],
+                "required": ["origin_token"],
                 "additionalProperties": false,
             ],
         ]]])
@@ -94,18 +94,20 @@ private func handle(_ message: [String: Any]) {
             return
         }
         let arguments = params["arguments"] as? [String: Any] ?? [:]
-        guard let originToken = arguments["origin_token"] as? String,
-              let prompt = arguments["recovery_prompt"] as? String,
-              !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            writeError(id: id, code: -32602, message: "origin_token and recovery_prompt are required")
+        guard let originToken = arguments["origin_token"] as? String else {
+            writeError(id: id, code: -32602, message: "origin_token is required")
             return
         }
+        let suppliedPrompt = arguments["recovery_prompt"] as? String
+        let prompt = suppliedPrompt?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackPrompt = (prompt?.isEmpty == false) ? prompt! : RestartRequest.defaultPrompt
         let delay = arguments["delay_seconds"] as? Int ?? 2
         do {
-            let threadID = try resolveOriginThread(originToken)
+            let origin = try resolveOrigin(originToken)
             let request = RestartRequest(
-                threadID: threadID,
-                recoveryPrompt: prompt,
+                threadID: origin.threadID,
+                recoveryPrompt: fallbackPrompt,
+                contextSnapshot: origin.contextSnapshot,
                 delaySeconds: delay
             )
             try store.enqueue(request)
@@ -113,7 +115,7 @@ private func handle(_ message: [String: Any]) {
             result(id: id, value: [
                 "content": [[
                     "type": "text",
-                    "text": "Codex restart scheduled in \(request.delaySeconds) seconds. Exact task \(threadID) queued for automatic continuation.",
+                    "text": "Codex restart scheduled in \(request.delaySeconds) seconds. Exact task \(origin.threadID) queued. Guardian will create a private on-device continuation prompt from its sanitized recent state.",
                 ]],
                 "isError": false,
             ])

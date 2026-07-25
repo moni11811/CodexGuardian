@@ -7,6 +7,7 @@ public struct RestartRequest: Codable, Equatable, Sendable {
     public let requestedAt: Date
     public let threadID: String
     public let recoveryPrompt: String
+    public let contextSnapshot: String?
     public let delaySeconds: Int
     public let targetBundleIdentifier: String
 
@@ -15,6 +16,7 @@ public struct RestartRequest: Codable, Equatable, Sendable {
         requestedAt: Date = Date(),
         threadID: String = "",
         recoveryPrompt: String = RestartRequest.defaultPrompt,
+        contextSnapshot: String? = nil,
         delaySeconds: Int = 2,
         targetBundleIdentifier: String = "com.openai.codex"
     ) {
@@ -22,8 +24,21 @@ public struct RestartRequest: Codable, Equatable, Sendable {
         self.requestedAt = requestedAt
         self.threadID = threadID
         self.recoveryPrompt = recoveryPrompt
+        self.contextSnapshot = contextSnapshot
         self.delaySeconds = min(max(delaySeconds, 1), 30)
         self.targetBundleIdentifier = targetBundleIdentifier
+    }
+
+    public func withRecoveryPrompt(_ prompt: String) -> RestartRequest {
+        RestartRequest(
+            id: id,
+            requestedAt: requestedAt,
+            threadID: threadID,
+            recoveryPrompt: prompt,
+            contextSnapshot: contextSnapshot,
+            delaySeconds: delaySeconds,
+            targetBundleIdentifier: targetBundleIdentifier
+        )
     }
 }
 
