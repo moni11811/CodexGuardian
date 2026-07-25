@@ -1,0 +1,8 @@
+/.build/
+/dist/
+.DS_Store
+.env
+.env.*
+*.pem
+*.p12
+*.key
