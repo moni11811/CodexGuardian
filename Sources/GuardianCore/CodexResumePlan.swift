@@ -3,7 +3,7 @@ public struct CodexResumePlan: Equatable, Sendable {
 
     public init(request: RestartRequest) {
         arguments = [
-            "exec", "resume", "--json",
+            "exec", "--skip-git-repo-check", "resume", "--json",
             request.threadID,
             request.recoveryPrompt,
         ]

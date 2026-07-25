@@ -100,9 +100,15 @@ final class AppModel: ObservableObject {
             try? await Task.sleep(for: .seconds(2))
             running.filter(\.isTerminated.negated).forEach { $0.forceTerminate() }
 
+            for _ in 0..<20 where !NSRunningApplication.runningApplications(
+                withBundleIdentifier: request.targetBundleIdentifier
+            ).isEmpty {
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+
             let resumable = requests.filter { !$0.threadID.isEmpty }
             let resumed = resumable.filter { self?.startContinuation(for: $0) == true }.count
-            let didLaunch = self?.launchCodex(
+            let didLaunch = await self?.launchCodex(
                 plan: launchPlan,
                 resolvedApplicationURL: resolvedApplicationURL
             ) ?? false
@@ -140,9 +146,17 @@ final class AppModel: ObservableObject {
     private func launchCodex(
         plan: CodexLaunchPlan,
         resolvedApplicationURL: URL?
-    ) -> Bool {
-        if runOpen(arguments: ["-b", plan.bundleIdentifier]) {
-            return true
+    ) async -> Bool {
+        let policy = CodexRelaunchPolicy()
+        for _ in 0..<3 {
+            let opened = runOpen(arguments: ["-b", plan.bundleIdentifier])
+            try? await Task.sleep(for: .seconds(1))
+            let running = !NSRunningApplication.runningApplications(
+                withBundleIdentifier: plan.bundleIdentifier
+            ).isEmpty
+            if policy.isRecovered(openSucceeded: opened, applicationIsRunning: running) {
+                return true
+            }
         }
 
         var candidatePaths = plan.fallbackApplicationPaths
@@ -151,8 +165,15 @@ final class AppModel: ObservableObject {
         }
 
         for path in candidatePaths where FileManager.default.fileExists(atPath: path) {
-            if runOpen(arguments: [path]) {
-                return true
+            for _ in 0..<3 {
+                let opened = runOpen(arguments: ["-n", path])
+                try? await Task.sleep(for: .seconds(1))
+                let running = !NSRunningApplication.runningApplications(
+                    withBundleIdentifier: plan.bundleIdentifier
+                ).isEmpty
+                if policy.isRecovered(openSucceeded: opened, applicationIsRunning: running) {
+                    return true
+                }
             }
         }
         return false

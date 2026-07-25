@@ -12,7 +12,7 @@ import Foundation
     let plan = CodexResumePlan(request: request)
 
     #expect(plan.arguments == [
-        "exec", "resume", "--json",
+        "exec", "--skip-git-repo-check", "resume", "--json",
         "019f0000-0000-7000-8000-000000000002",
         "Inspect state and continue",
     ])
@@ -37,5 +37,5 @@ import Foundation
 
     let output = try String(contentsOf: log, encoding: .utf8)
     #expect(process.terminationStatus == 0)
-    #expect(output.contains("exec resume --json 019f0000-0000-7000-8000-000000000002 Continue exact task"))
+    #expect(output.contains("exec --skip-git-repo-check resume --json 019f0000-0000-7000-8000-000000000002 Continue exact task"))
 }

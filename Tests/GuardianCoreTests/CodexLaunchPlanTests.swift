@@ -7,3 +7,10 @@ import Testing
     #expect(plan.bundleIdentifier == "com.openai.codex")
     #expect(plan.fallbackApplicationPaths.contains("/Applications/ChatGPT.app"))
 }
+
+@Test func successfulOpenWithoutRunningCodexIsNotRecovery() {
+    let policy = CodexRelaunchPolicy()
+
+    #expect(!policy.isRecovered(openSucceeded: true, applicationIsRunning: false))
+    #expect(policy.isRecovered(openSucceeded: true, applicationIsRunning: true))
+}
