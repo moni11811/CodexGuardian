@@ -235,3 +235,23 @@ import Testing
     }
     #expect(try store.request(originToken: request.originToken!)?.recoveryPhase == .claimed)
 }
+
+@Test func legacyCopyOnlyRequestIsPreservedButDoesNotBlockArmedQueue() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    let store = RestartRequestStore(directory: directory)
+    let legacy = RestartRequest(threadID: "legacy-thread")
+    let armed = RestartRequest(
+        threadID: "exact-thread",
+        originToken: "31A25291-BDB6-44EF-AAB8-A95450F99A91",
+        continuationAutomationID: "guardian-recovery-test"
+    )
+    try store.enqueue(legacy)
+    try store.enqueue(armed)
+
+    let blocked = try store.quarantineUnarmedPendingRequests()
+
+    #expect(blocked.map(\.id) == [legacy.id])
+    #expect(try store.peekAllPending() == [armed])
+    #expect(try store.blockedRequests() == [legacy])
+}

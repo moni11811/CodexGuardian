@@ -18,6 +18,9 @@ final class AppModel: ObservableObject {
 
     init() {
         try? store.recoverClaims()
+        if let blocked = try? store.quarantineUnarmedPendingRequests(), !blocked.isEmpty {
+            status = "Preserved \(blocked.count) legacy restart request(s)"
+        }
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.poll() }
         }

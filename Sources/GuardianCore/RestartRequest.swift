@@ -295,6 +295,48 @@ public struct RestartRequestStore: Sendable {
         try pendingRequests().map(\.request)
     }
 
+    @discardableResult
+    public func quarantineUnarmedPendingRequests() throws -> [RestartRequest] {
+        let unarmed = try pendingRequests().filter {
+            !$0.request.automaticContinuationIsArmed
+        }
+        guard !unarmed.isEmpty else { return [] }
+        try FileManager.default.createDirectory(
+            at: blockedDirectory,
+            withIntermediateDirectories: true
+        )
+        for item in unarmed {
+            var destination = blockedDirectory.appending(path: item.url.lastPathComponent)
+            if FileManager.default.fileExists(atPath: destination.path) {
+                destination = blockedDirectory.appending(
+                    path: "blocked-\(UUID().uuidString).json"
+                )
+            }
+            try FileManager.default.moveItem(at: item.url, to: destination)
+        }
+        return unarmed.map(\.request)
+    }
+
+    public func blockedRequests() throws -> [RestartRequest] {
+        guard FileManager.default.fileExists(atPath: blockedDirectory.path) else { return [] }
+        return try FileManager.default.contentsOfDirectory(
+            at: blockedDirectory,
+            includingPropertiesForKeys: nil
+        ).filter { $0.pathExtension == "json" }
+            .map { url in
+                try JSONDecoder().decode(
+                    RestartRequest.self,
+                    from: Data(contentsOf: url)
+                )
+            }
+            .sorted {
+                if $0.requestedAt == $1.requestedAt {
+                    return $0.id.uuidString < $1.id.uuidString
+                }
+                return $0.requestedAt < $1.requestedAt
+            }
+    }
+
     public func claimPending(ids: Set<UUID>) throws {
         try FileManager.default.createDirectory(
             at: claimedDirectory,
@@ -439,6 +481,10 @@ public struct RestartRequestStore: Sendable {
 
     public var claimedDirectory: URL {
         directory.appending(path: "claimed", directoryHint: .isDirectory)
+    }
+
+    public var blockedDirectory: URL {
+        directory.appending(path: "blocked", directoryHint: .isDirectory)
     }
 
     private func requestURL(for request: RestartRequest) -> URL {
