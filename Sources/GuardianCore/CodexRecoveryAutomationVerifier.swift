@@ -47,8 +47,17 @@ public struct CodexRecoveryAutomationVerifier: Sendable {
         return true
     }
 
+    public func automationExists(automationID: String) throws -> Bool {
+        guard isSafePathComponent(automationID) else { return true }
+        return FileManager.default.fileExists(
+            atPath: automationsDirectory
+                .appending(path: automationID, directoryHint: .isDirectory)
+                .path
+        )
+    }
+
     private func isSafePathComponent(_ value: String) -> Bool {
-        !value.isEmpty && value.allSatisfy {
+        !value.isEmpty && value != "." && value != ".." && value.allSatisfy {
             $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == "."
         }
     }

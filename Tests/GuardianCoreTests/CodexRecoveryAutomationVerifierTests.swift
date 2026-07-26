@@ -57,6 +57,8 @@ import Testing
         threadID: "right-thread",
         originToken: originToken
     ))
+    #expect(try verifier.automationExists(automationID: "paused-recovery"))
+    #expect(try !verifier.automationExists(automationID: "already-deleted"))
 }
 
 @Test func malformedHeartbeatPromptOrScheduleFailsClosed() throws {
@@ -89,6 +91,28 @@ import Testing
     ))
     #expect(try !verifier.isArmed(
         automationID: "wrong-schedule",
+        threadID: "exact-thread",
+        originToken: token
+    ))
+}
+
+@Test func automationIdentifierCannotEscapeItsStateDirectory() throws {
+    let parent = FileManager.default.temporaryDirectory
+        .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    defer { try? FileManager.default.removeItem(at: parent) }
+    let root = parent.appending(path: "automations", directoryHint: .isDirectory)
+    let token = "31A25291-BDB6-44EF-AAB8-A95450F99A91"
+    try writeAutomation(
+        root: root,
+        id: "..",
+        threadID: "exact-thread",
+        status: "ACTIVE",
+        prompt: "Call recovery_tick with \(token)"
+    )
+    let verifier = CodexRecoveryAutomationVerifier(automationsDirectory: root)
+
+    #expect(try !verifier.isArmed(
+        automationID: "..",
         threadID: "exact-thread",
         originToken: token
     ))

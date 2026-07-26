@@ -9,11 +9,18 @@ public struct CodexTaskActivity: Equatable, Sendable {
     public let threadID: String
     public let modifiedAt: Date
     public let state: CodexTaskActivityState
+    public let activeRecoveryOriginToken: String?
 
-    public init(threadID: String, modifiedAt: Date, state: CodexTaskActivityState) {
+    public init(
+        threadID: String,
+        modifiedAt: Date,
+        state: CodexTaskActivityState,
+        activeRecoveryOriginToken: String? = nil
+    ) {
         self.threadID = threadID
         self.modifiedAt = modifiedAt
         self.state = state
+        self.activeRecoveryOriginToken = activeRecoveryOriginToken
     }
 }
 
@@ -57,7 +64,9 @@ public struct RestartQuiescencePolicy: Sendable {
         let knownThreadIDs = Set(relevant.map(\.threadID))
         let missingOriginIDs = Set(requests.map(\.threadID).filter { !knownThreadIDs.contains($0) })
         let activeIDs = Set(
-            relevant.filter { $0.state == .active }.map(\.threadID)
+            relevant.filter {
+                $0.state == .active && !isMatchingRecoveryHeartbeat($0, requests: requests)
+            }.map(\.threadID)
         ).union(missingOriginIDs).sorted()
         if !activeIDs.isEmpty {
             return .waitForTasks(activeIDs)
@@ -73,6 +82,19 @@ public struct RestartQuiescencePolicy: Sendable {
             return .waitForQuietPeriod
         }
         return .restart
+    }
+
+    private func isMatchingRecoveryHeartbeat(
+        _ activity: CodexTaskActivity,
+        requests: [RestartRequest]
+    ) -> Bool {
+        guard let activityToken = activity.activeRecoveryOriginToken,
+              let activityUUID = UUID(uuidString: activityToken) else { return false }
+        return requests.contains { request in
+            request.threadID == activity.threadID
+                && request.heartbeatObservedAt != nil
+                && request.originToken.flatMap(UUID.init(uuidString:)) == activityUUID
+        }
     }
 }
 
@@ -128,7 +150,8 @@ public struct CodexTaskActivityScanner: Sendable {
         return CodexTaskActivity(
             threadID: threadID,
             modifiedAt: modifiedAt,
-            state: state(from: tail)
+            state: state(from: tail),
+            activeRecoveryOriginToken: activeRecoveryOriginToken(from: tail)
         )
     }
 
@@ -157,5 +180,40 @@ public struct CodexTaskActivityScanner: Sendable {
             return .idle
         }
         return .active
+    }
+
+    private func activeRecoveryOriginToken(from data: Data) -> String? {
+        for line in String(decoding: data, as: UTF8.self)
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .reversed() {
+            guard let lineData = line.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: lineData)
+                    as? [String: Any],
+                  let message = userMessage(from: object) else { continue }
+            return recoveryOriginToken(from: message)
+        }
+        return nil
+    }
+
+    private func userMessage(from object: [String: Any]) -> String? {
+        guard let payload = object["payload"] as? [String: Any] else { return nil }
+        if object["type"] as? String == "event_msg",
+           payload["type"] as? String == "user_message" {
+            return payload["message"] as? String
+        }
+        guard object["type"] as? String == "response_item",
+              payload["type"] as? String == "message",
+              payload["role"] as? String == "user",
+              let content = payload["content"] as? [[String: Any]] else { return nil }
+        return content.compactMap { $0["text"] as? String }.joined(separator: "\n")
+    }
+
+    private func recoveryOriginToken(from message: String) -> String? {
+        let marker = "Codex Guardian hard-recovery heartbeat "
+        guard message.contains("<heartbeat>"),
+              message.contains("recovery_tick"),
+              let markerRange = message.range(of: marker) else { return nil }
+        let candidate = String(message[markerRange.upperBound...].prefix(36))
+        return UUID(uuidString: candidate)?.uuidString
     }
 }

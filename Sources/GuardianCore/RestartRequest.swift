@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 public enum RestartRecoveryPhase: String, Codable, Equatable, Sendable {
     case queued
@@ -10,6 +11,7 @@ public enum RestartRecoveryPhase: String, Codable, Equatable, Sendable {
 public enum RestartRequestStoreError: Error, Equatable, Sendable {
     case duplicateOriginToken
     case heartbeatNotObserved
+    case stateBusy
 }
 
 extension RestartRequestStoreError: LocalizedError {
@@ -19,6 +21,8 @@ extension RestartRequestStoreError: LocalizedError {
             return "The recovery origin token already belongs to another restart request."
         case .heartbeatNotObserved:
             return "The native recovery heartbeat has not been observed."
+        case .stateBusy:
+            return "Guardian recovery state is busy. Try again after the current operation finishes."
         }
     }
 }
@@ -244,9 +248,14 @@ public struct RestartRequest: Codable, Equatable, Sendable {
 
 public struct RestartRequestStore: Sendable {
     public let directory: URL
+    public let lockTimeout: TimeInterval
 
-    public init(directory: URL = Self.defaultDirectory()) {
+    public init(
+        directory: URL = Self.defaultDirectory(),
+        lockTimeout: TimeInterval = 2
+    ) {
         self.directory = directory
+        self.lockTimeout = max(0, lockTimeout)
     }
 
     public static func defaultDirectory() -> URL {
@@ -265,92 +274,105 @@ public struct RestartRequestStore: Sendable {
 
     @discardableResult
     public func enqueueUnique(_ request: RestartRequest) throws -> UUID {
-        if let token = request.originToken,
-           let existing = try self.request(originToken: token) {
-            guard existing.threadID == request.threadID,
-                  existing.continuationAutomationID == request.continuationAutomationID else {
-                throw RestartRequestStoreError.duplicateOriginToken
+        try withExclusiveLock {
+            if let token = request.originToken {
+                let matches = try locatedItems(originToken: token)
+                guard matches.count <= 1 else {
+                    throw RestartRequestStoreError.duplicateOriginToken
+                }
+                if let existing = matches.first?.request {
+                    guard existing.threadID == request.threadID,
+                          existing.continuationAutomationID == request.continuationAutomationID else {
+                        throw RestartRequestStoreError.duplicateOriginToken
+                    }
+                    return existing.id
+                }
             }
-            return existing.id
+            try enqueue(request)
+            return request.id
         }
-        try enqueue(request)
-        return request.id
     }
 
     public func takePending() throws -> RestartRequest? {
-        guard let first = try pendingRequests().first else { return nil }
-        try FileManager.default.removeItem(at: first.url)
-        return first.request
+        try withExclusiveLock {
+            guard let first = try pendingRequests().first else { return nil }
+            try FileManager.default.removeItem(at: first.url)
+            return first.request
+        }
     }
 
     public func takeAllPending() throws -> [RestartRequest] {
-        let pending = try pendingRequests()
-        for item in pending {
-            try FileManager.default.removeItem(at: item.url)
+        try withExclusiveLock {
+            let pending = try pendingRequests()
+            for item in pending {
+                try FileManager.default.removeItem(at: item.url)
+            }
+            return pending.map(\.request)
         }
-        return pending.map(\.request)
     }
 
     public func peekAllPending() throws -> [RestartRequest] {
-        try pendingRequests().map(\.request)
+        try withExclusiveLock {
+            try pendingRequests().map(\.request)
+        }
     }
 
     @discardableResult
     public func quarantineUnarmedPendingRequests() throws -> [RestartRequest] {
-        let unarmed = try pendingRequests().filter {
-            !$0.request.automaticContinuationIsArmed
-        }
-        guard !unarmed.isEmpty else { return [] }
-        try FileManager.default.createDirectory(
-            at: blockedDirectory,
-            withIntermediateDirectories: true
-        )
-        for item in unarmed {
-            var destination = blockedDirectory.appending(path: item.url.lastPathComponent)
-            if FileManager.default.fileExists(atPath: destination.path) {
-                destination = blockedDirectory.appending(
-                    path: "blocked-\(UUID().uuidString).json"
-                )
+        try withExclusiveLock {
+            let unarmed = try pendingRequests().filter {
+                !$0.request.automaticContinuationIsArmed
             }
-            try FileManager.default.moveItem(at: item.url, to: destination)
+            guard !unarmed.isEmpty else { return [] }
+            try FileManager.default.createDirectory(
+                at: blockedDirectory,
+                withIntermediateDirectories: true
+            )
+            for item in unarmed {
+                var destination = blockedDirectory.appending(path: item.url.lastPathComponent)
+                if FileManager.default.fileExists(atPath: destination.path) {
+                    destination = blockedDirectory.appending(
+                        path: "blocked-\(UUID().uuidString).json"
+                    )
+                }
+                try FileManager.default.moveItem(at: item.url, to: destination)
+            }
+            return unarmed.map(\.request)
         }
-        return unarmed.map(\.request)
     }
 
     public func blockedRequests() throws -> [RestartRequest] {
-        guard FileManager.default.fileExists(atPath: blockedDirectory.path) else { return [] }
-        return try FileManager.default.contentsOfDirectory(
-            at: blockedDirectory,
-            includingPropertiesForKeys: nil
-        ).filter { $0.pathExtension == "json" }
-            .map { url in
-                try JSONDecoder().decode(
-                    RestartRequest.self,
-                    from: Data(contentsOf: url)
-                )
-            }
-            .sorted {
+        try withExclusiveLock {
+            guard FileManager.default.fileExists(atPath: blockedDirectory.path) else { return [] }
+            let urls = try FileManager.default.contentsOfDirectory(
+                at: blockedDirectory,
+                includingPropertiesForKeys: nil
+            ).filter { $0.pathExtension == "json" }
+            return try decodedItems(at: urls).map(\.request).sorted {
                 if $0.requestedAt == $1.requestedAt {
                     return $0.id.uuidString < $1.id.uuidString
                 }
                 return $0.requestedAt < $1.requestedAt
             }
+        }
     }
 
     public func claimPending(ids: Set<UUID>) throws {
-        try FileManager.default.createDirectory(
-            at: claimedDirectory,
-            withIntermediateDirectories: true
-        )
-        let matching = try pendingRequests().filter { ids.contains($0.request.id) }
-        guard Set(matching.map(\.request.id)) == ids else {
-            throw CocoaError(.fileNoSuchFile)
-        }
-        for pending in matching {
-            let destination = claimedDirectory.appending(path: pending.url.lastPathComponent)
-            try FileManager.default.moveItem(at: pending.url, to: destination)
-            let claimed = pending.request.withRecoveryPhase(.claimed)
-            try JSONEncoder().encode(claimed).write(to: destination, options: .atomic)
+        try withExclusiveLock {
+            try FileManager.default.createDirectory(
+                at: claimedDirectory,
+                withIntermediateDirectories: true
+            )
+            let matching = try pendingRequests().filter { ids.contains($0.request.id) }
+            guard Set(matching.map(\.request.id)) == ids else {
+                throw CocoaError(.fileNoSuchFile)
+            }
+            for pending in matching {
+                let destination = claimedDirectory.appending(path: pending.url.lastPathComponent)
+                try FileManager.default.moveItem(at: pending.url, to: destination)
+                let claimed = pending.request.withRecoveryPhase(.claimed)
+                try JSONEncoder().encode(claimed).write(to: destination, options: .atomic)
+            }
         }
     }
 
@@ -359,56 +381,62 @@ public struct RestartRequestStore: Sendable {
         processIdentifier: Int32,
         restartedAt: Date
     ) throws {
-        guard let item = try claimedItems().first(where: { $0.request.id == id }) else {
-            throw CocoaError(.fileNoSuchFile)
+        try withExclusiveLock {
+            guard let item = try claimedItems().first(where: { $0.request.id == id }) else {
+                throw CocoaError(.fileNoSuchFile)
+            }
+            guard item.request.recoveryPhase == .claimed,
+                  item.request.heartbeatObservedAt != nil,
+                  processIdentifier > 0 else {
+                throw RestartRequestStoreError.heartbeatNotObserved
+            }
+            let awaiting = item.request.awaitingContinuation(
+                processIdentifier: processIdentifier,
+                restartedAt: restartedAt
+            )
+            try JSONEncoder().encode(awaiting).write(to: item.url, options: .atomic)
         }
-        guard item.request.recoveryPhase == .claimed,
-              item.request.heartbeatObservedAt != nil,
-              processIdentifier > 0 else {
-            throw RestartRequestStoreError.heartbeatNotObserved
-        }
-        let awaiting = item.request.awaitingContinuation(
-            processIdentifier: processIdentifier,
-            restartedAt: restartedAt
-        )
-        try JSONEncoder().encode(awaiting).write(to: item.url, options: .atomic)
     }
 
     public func updateClaimedRequests(_ requests: [RestartRequest]) throws {
-        let updates = Dictionary(uniqueKeysWithValues: requests.map { ($0.id, $0) })
-        guard updates.count == requests.count else { throw CocoaError(.fileWriteInvalidFileName) }
-        let matching = try claimedItems().filter { updates[$0.request.id] != nil }
-        guard Set(matching.map(\.request.id)) == Set(updates.keys) else {
-            throw CocoaError(.fileNoSuchFile)
-        }
-        for item in matching {
-            guard let update = updates[item.request.id],
-                  update.threadID == item.request.threadID,
-                  update.originToken == item.request.originToken,
-                  update.continuationAutomationID == item.request.continuationAutomationID else {
-                throw CocoaError(.fileWriteUnknown)
+        try withExclusiveLock {
+            let updates = Dictionary(uniqueKeysWithValues: requests.map { ($0.id, $0) })
+            guard updates.count == requests.count else { throw CocoaError(.fileWriteInvalidFileName) }
+            let matching = try claimedItems().filter { updates[$0.request.id] != nil }
+            guard Set(matching.map(\.request.id)) == Set(updates.keys) else {
+                throw CocoaError(.fileNoSuchFile)
             }
-            let persisted = update.withRecoveryPhase(item.request.recoveryPhase)
-            try JSONEncoder().encode(persisted).write(to: item.url, options: .atomic)
+            for item in matching {
+                guard let update = updates[item.request.id],
+                      update.threadID == item.request.threadID,
+                      update.originToken == item.request.originToken,
+                      update.continuationAutomationID == item.request.continuationAutomationID else {
+                    throw CocoaError(.fileWriteUnknown)
+                }
+                let persisted = update.withRecoveryPhase(item.request.recoveryPhase)
+                try JSONEncoder().encode(persisted).write(to: item.url, options: .atomic)
+            }
         }
     }
 
     public func request(originToken: String) throws -> RestartRequest? {
-        let pending = try pendingRequests().map(\.request)
-        let claimed = try claimedItems().map(\.request)
-        let matches = (pending + claimed).filter { $0.originToken == originToken }
-        guard matches.count <= 1 else { throw RestartRequestStoreError.duplicateOriginToken }
-        return matches.first
+        try withExclusiveLock {
+            let matches = try locatedItems(originToken: originToken)
+            guard matches.count <= 1 else { throw RestartRequestStoreError.duplicateOriginToken }
+            return matches.first?.request
+        }
     }
 
     @discardableResult
     public func markHeartbeatObserved(originToken: String, at date: Date = Date()) throws -> UUID? {
-        let matching = try locatedItems(originToken: originToken)
-        guard matching.count <= 1 else { throw RestartRequestStoreError.duplicateOriginToken }
-        guard let item = matching.first else { return nil }
-        let observed = item.request.withHeartbeatObserved(at: date)
-        try JSONEncoder().encode(observed).write(to: item.url, options: .atomic)
-        return observed.id
+        try withExclusiveLock {
+            let matching = try locatedItems(originToken: originToken)
+            guard matching.count <= 1 else { throw RestartRequestStoreError.duplicateOriginToken }
+            guard let item = matching.first else { return nil }
+            let observed = item.request.withHeartbeatObserved(at: date)
+            try JSONEncoder().encode(observed).write(to: item.url, options: .atomic)
+            return observed.id
+        }
     }
 
     public func leaseContinuation(
@@ -416,57 +444,59 @@ public struct RestartRequestStore: Sendable {
         now: Date = Date(),
         leaseDuration: TimeInterval = 300
     ) throws -> ContinuationLeaseResult {
-        let matching = try claimedItems().filter { $0.request.originToken == originToken }
-        guard matching.count <= 1 else { throw RestartRequestStoreError.duplicateOriginToken }
-        guard let item = matching.first else { return .waiting }
-        switch item.request.recoveryPhase {
-        case .awaitingContinuation:
-            break
-        case .deliveringContinuation:
-            guard let startedAt = item.request.deliveryLeaseStartedAt,
-                  now.timeIntervalSince(startedAt) >= leaseDuration else { return .waiting }
-        case .queued, .claimed:
-            return .waiting
+        try withExclusiveLock {
+            let matching = try claimedItems().filter { $0.request.originToken == originToken }
+            guard matching.count <= 1 else { throw RestartRequestStoreError.duplicateOriginToken }
+            guard let item = matching.first else { return .waiting }
+            switch item.request.recoveryPhase {
+            case .awaitingContinuation:
+                break
+            case .deliveringContinuation:
+                guard let startedAt = item.request.deliveryLeaseStartedAt,
+                      now.timeIntervalSince(startedAt) >= leaseDuration else { return .waiting }
+            case .queued, .claimed:
+                return .waiting
+            }
+            let leased = item.request.withDeliveryLease(startedAt: now)
+            try JSONEncoder().encode(leased).write(to: item.url, options: .atomic)
+            return .delivery(leased)
         }
-        let leased = item.request.withDeliveryLease(startedAt: now)
-        try JSONEncoder().encode(leased).write(to: item.url, options: .atomic)
-        return .delivery(leased)
     }
 
     @discardableResult
     public func acknowledgeContinuation(originToken: String) throws -> UUID? {
-        guard let item = try claimedItems().first(where: {
-            $0.request.originToken == originToken
-                && $0.request.recoveryPhase == .deliveringContinuation
-        }) else { return nil }
-        try FileManager.default.removeItem(at: item.url)
-        return item.request.id
+        try withExclusiveLock {
+            guard let item = try claimedItems().first(where: {
+                $0.request.originToken == originToken
+                    && $0.request.recoveryPhase == .deliveringContinuation
+            }) else { return nil }
+            try FileManager.default.removeItem(at: item.url)
+            return item.request.id
+        }
     }
 
     public func recoverClaims() throws {
-        guard FileManager.default.fileExists(atPath: claimedDirectory.path) else { return }
-        try FileManager.default.createDirectory(at: queueDirectory, withIntermediateDirectories: true)
-        for item in try claimedItems() {
-            guard ![.awaitingContinuation, .deliveringContinuation]
-                .contains(item.request.recoveryPhase) else { continue }
-            var destination = queueDirectory.appending(path: item.url.lastPathComponent)
-            if FileManager.default.fileExists(atPath: destination.path) {
-                destination = queueDirectory.appending(path: "recovered-\(UUID().uuidString).json")
+        try withExclusiveLock {
+            guard FileManager.default.fileExists(atPath: claimedDirectory.path) else { return }
+            try FileManager.default.createDirectory(at: queueDirectory, withIntermediateDirectories: true)
+            for item in try claimedItems() {
+                guard ![.awaitingContinuation, .deliveringContinuation]
+                    .contains(item.request.recoveryPhase) else { continue }
+                var destination = queueDirectory.appending(path: item.url.lastPathComponent)
+                if FileManager.default.fileExists(atPath: destination.path) {
+                    destination = queueDirectory.appending(path: "recovered-\(UUID().uuidString).json")
+                }
+                let queued = item.request.withRecoveryPhase(.queued)
+                try JSONEncoder().encode(queued).write(to: destination, options: .atomic)
+                try FileManager.default.removeItem(at: item.url)
             }
-            let queued = item.request.withRecoveryPhase(.queued)
-            try JSONEncoder().encode(queued).write(to: destination, options: .atomic)
-            try FileManager.default.removeItem(at: item.url)
         }
     }
 
     public func completeClaims(ids: Set<UUID>) throws {
-        for url in try claimURLs() {
-            let request = try JSONDecoder().decode(
-                RestartRequest.self,
-                from: Data(contentsOf: url)
-            )
-            if ids.contains(request.id) {
-                try FileManager.default.removeItem(at: url)
+        try withExclusiveLock {
+            for item in try claimedItems() where ids.contains(item.request.id) {
+                try FileManager.default.removeItem(at: item.url)
             }
         }
     }
@@ -487,6 +517,10 @@ public struct RestartRequestStore: Sendable {
         directory.appending(path: "blocked", directoryHint: .isDirectory)
     }
 
+    public var corruptDirectory: URL {
+        blockedDirectory.appending(path: "corrupt", directoryHint: .isDirectory)
+    }
+
     private func requestURL(for request: RestartRequest) -> URL {
         let timestamp = String(format: "%020.6f", request.requestedAt.timeIntervalSince1970)
         return queueDirectory.appending(path: "\(timestamp)-\(request.id.uuidString).json")
@@ -501,13 +535,7 @@ public struct RestartRequestStore: Sendable {
     }
 
     private func claimedItems() throws -> [(url: URL, request: RestartRequest)] {
-        try claimURLs().map { url in
-            let request = try JSONDecoder().decode(
-                RestartRequest.self,
-                from: Data(contentsOf: url)
-            )
-            return (url, request)
-        }
+        try decodedItems(at: claimURLs())
     }
 
     private func locatedItems(originToken: String) throws -> [(url: URL, request: RestartRequest)] {
@@ -527,14 +555,70 @@ public struct RestartRequestStore: Sendable {
         if FileManager.default.fileExists(atPath: pendingURL.path) {
             urls.append(pendingURL)
         }
-        return try urls.map { url in
-            let request = try JSONDecoder().decode(RestartRequest.self, from: Data(contentsOf: url))
-            return (url, request)
-        }.sorted {
+        return try decodedItems(at: urls).sorted {
             if $0.request.requestedAt == $1.request.requestedAt {
                 return $0.request.id.uuidString < $1.request.id.uuidString
             }
             return $0.request.requestedAt < $1.request.requestedAt
         }
+    }
+
+    private func decodedItems(at urls: [URL]) throws -> [(url: URL, request: RestartRequest)] {
+        var decoded: [(url: URL, request: RestartRequest)] = []
+        for url in urls {
+            let data = try Data(contentsOf: url)
+            do {
+                let request = try JSONDecoder().decode(
+                    RestartRequest.self,
+                    from: data
+                )
+                decoded.append((url, request))
+            } catch is DecodingError {
+                try quarantineCorruptItem(at: url)
+            }
+        }
+        return decoded
+    }
+
+    private func quarantineCorruptItem(at url: URL) throws {
+        try FileManager.default.createDirectory(
+            at: corruptDirectory,
+            withIntermediateDirectories: true
+        )
+        var destination = corruptDirectory.appending(path: url.lastPathComponent)
+        if FileManager.default.fileExists(atPath: destination.path) {
+            destination = corruptDirectory.appending(
+                path: "corrupt-\(UUID().uuidString)-\(url.lastPathComponent)"
+            )
+        }
+        try FileManager.default.moveItem(at: url, to: destination)
+    }
+
+    private var lockURL: URL {
+        directory.appending(path: ".state.lock")
+    }
+
+    private func withExclusiveLock<T>(_ operation: () throws -> T) throws -> T {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let descriptor = open(lockURL.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        defer {
+            _ = flock(descriptor, LOCK_UN)
+            _ = close(descriptor)
+        }
+        let deadline = Date().addingTimeInterval(lockTimeout)
+        while flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
+            let lockError = errno
+            guard lockError == EWOULDBLOCK || lockError == EAGAIN else {
+                throw POSIXError(POSIXErrorCode(rawValue: lockError) ?? .EIO)
+            }
+            guard Date() < deadline else {
+                throw RestartRequestStoreError.stateBusy
+            }
+            usleep(10_000)
+        }
+        return try operation()
     }
 }

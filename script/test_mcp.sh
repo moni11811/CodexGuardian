@@ -28,7 +28,11 @@ grep -q '"required":\["origin_token","continuation_automation_id"\]' <<<"$OUTPUT
 grep -q 'sanitized recent task state' <<<"$OUTPUT"
 grep -q 'codex_app__send_message_to_thread' <<<"$OUTPUT"
 grep -q 'heartbeat continues the exact task after relaunch' <<<"$OUTPUT"
-grep -q 'every observed task is idle and quiet' <<<"$OUTPUT"
+grep -q 'every unrelated observed task is idle' <<<"$OUTPUT"
+if grep -q 'delete or pause' <<<"$OUTPUT"; then
+  echo "MCP permits stale paused recovery heartbeats" >&2
+  exit 1
+fi
 if grep -q 'cannot submit a new turn automatically\|prompt copied' <<<"$OUTPUT"; then
   echo "MCP still exposes copy-only hard recovery" >&2
   exit 1

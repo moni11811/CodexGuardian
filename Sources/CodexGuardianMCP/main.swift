@@ -163,7 +163,7 @@ private func handle(_ message: [String: Any]) {
             ],
             [
                 "name": "restart_codex",
-                "description": "Queue a hard Codex restart only after prepare_restart and an exact-task Codex heartbeat. Guardian verifies the heartbeat, waits until every observed task is idle and quiet, then restarts. The heartbeat continues the exact task after relaunch.",
+                "description": "Queue a hard Codex restart only after prepare_restart and an exact-task Codex heartbeat. Guardian verifies the heartbeat, waits until every unrelated observed task is idle and Codex is quiet, then restarts. Only the verified recovery-heartbeat turn is ignored; resumed real work blocks restart. The heartbeat continues the exact task after relaunch.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [
@@ -199,7 +199,7 @@ private func handle(_ message: [String: Any]) {
             ],
             [
                 "name": "ack_recovery",
-                "description": "Acknowledge that the exact task is moving again. Delete or pause the returned heartbeat automation first, then call this after meaningful recovered progress.",
+                "description": "Acknowledge that the exact task is moving again. Delete the returned heartbeat automation first, then call this after meaningful recovered progress.",
                 "inputSchema": [
                     "type": "object",
                     "properties": ["origin_token": originToken],
@@ -281,7 +281,7 @@ private func handle(_ message: [String: Any]) {
                     "request_id": requestID.uuidString,
                     "thread_id": origin.threadID,
                     "automation_id": automationID,
-                    "next_action": "End this turn. Guardian waits for all tasks and the quiet period. The native heartbeat continues this exact task after relaunch.",
+                    "next_action": "End this turn. Guardian waits for unrelated tasks and the quiet period. The native heartbeat continues this exact task after relaunch.",
                 ])
 
             case "recovery_tick":
@@ -317,7 +317,7 @@ private func handle(_ message: [String: Any]) {
                     "thread_id": delivery.threadID,
                     "recovery_prompt": delivery.recoveryPrompt,
                     "automation_id": delivery.continuationAutomationID ?? "",
-                    "next_action": "Continue now in this exact task. After meaningful progress, delete or pause automation_id, then call ack_recovery with origin_token.",
+                    "next_action": "Continue now in this exact task. After meaningful progress, delete automation_id, then call ack_recovery with origin_token.",
                 ])
 
             case "ack_recovery":
@@ -326,15 +326,11 @@ private func handle(_ message: [String: Any]) {
                     writeError(id: id, code: -32602, message: "Recovery request was not found.")
                     return
                 }
-                if try automationVerifier.isArmed(
-                    automationID: automationID,
-                    threadID: delivered.threadID,
-                    originToken: originToken
-                ) {
+                if try automationVerifier.automationExists(automationID: automationID) {
                     writeError(
                         id: id,
                         code: -32602,
-                        message: "Delete or pause the recovery heartbeat before acknowledgement."
+                        message: "Delete the recovery heartbeat before acknowledgement."
                     )
                     return
                 }

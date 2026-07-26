@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import GuardianCore
 
@@ -25,8 +26,57 @@ import Testing
 @Test func continuationWaitsForVerifiedDesktopRelaunch() {
     let policy = CodexRecoveryStartupPolicy()
 
-    #expect(!policy.shouldStartContinuation(desktopIsRunning: false))
-    #expect(policy.shouldStartContinuation(desktopIsRunning: true))
+    #expect(!policy.shouldStartContinuation(
+        desktopIsRunning: false,
+        appServerIsRunning: false,
+        settledFor: 20
+    ))
+    #expect(!policy.shouldStartContinuation(
+        desktopIsRunning: true,
+        appServerIsRunning: false,
+        settledFor: 20
+    ))
+    #expect(!policy.shouldStartContinuation(
+        desktopIsRunning: true,
+        appServerIsRunning: true,
+        settledFor: 14
+    ))
+    #expect(policy.shouldStartContinuation(
+        desktopIsRunning: true,
+        appServerIsRunning: true,
+        settledFor: 15
+    ))
+}
+
+@Test func appServerGetsAFullSettleWindowAfterItAppears() {
+    let startedAt = Date(timeIntervalSince1970: 1_000)
+    var tracker = CodexRecoveryStartupTracker()
+
+    let beforeServer = tracker.shouldStartContinuation(
+        desktopIsRunning: true,
+        appServerIsRunning: false,
+        now: startedAt
+    )
+    let serverAppeared = tracker.shouldStartContinuation(
+        desktopIsRunning: true,
+        appServerIsRunning: true,
+        now: startedAt.addingTimeInterval(14)
+    )
+    let oneSecondShort = tracker.shouldStartContinuation(
+        desktopIsRunning: true,
+        appServerIsRunning: true,
+        now: startedAt.addingTimeInterval(28)
+    )
+    let fullySettled = tracker.shouldStartContinuation(
+        desktopIsRunning: true,
+        appServerIsRunning: true,
+        now: startedAt.addingTimeInterval(29)
+    )
+
+    #expect(!beforeServer)
+    #expect(!serverAppeared)
+    #expect(!oneSecondShort)
+    #expect(fullySettled)
 }
 
 @Test func recoveryDeepLinkTargetsExactDesktopThread() {

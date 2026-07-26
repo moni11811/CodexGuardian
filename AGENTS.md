@@ -21,9 +21,9 @@ Use `restart_codex` only when Codex cannot make progress without restarting its 
 3. Create an ACTIVE one-minute Codex heartbeat with `codex_app__automation_update`. Use the returned `thread_id` as `targetThreadId` and `heartbeat_prompt` as its prompt.
 4. Call `restart_codex` with the same `origin_token` and the returned automation id as `continuation_automation_id`.
 5. End the turn. Guardian waits while any observed Codex task is active.
-6. After every task is idle and Codex has been quiet for 15 seconds, Guardian restarts Codex. The heartbeat calls `recovery_tick` and continues the exact task after relaunch.
+6. After every unrelated task is idle and Codex has been quiet for 15 seconds, Guardian restarts Codex. Only the verified recovery-heartbeat turn is ignored; newly resumed real work in that task blocks restart. The heartbeat calls `recovery_tick` and continues the exact task after relaunch.
 
-If `recovery_tick` says `waiting`, end that heartbeat run. If it says `continue`, follow `recovery_prompt`. After meaningful progress, delete or pause the returned `automation_id` with `codex_app__automation_update`, then call `ack_recovery`.
+If `recovery_tick` says `waiting`, end that heartbeat run. If it says `continue`, follow `recovery_prompt`. After meaningful progress, delete the returned `automation_id` with `codex_app__automation_update`, then call `ack_recovery`. Pausing is insufficient because paused target-task heartbeats can still consume Codex recovery capacity.
 
 Guardian must fail closed if the exact-task heartbeat cannot be created or verified. Never restart first and promise a later continuation.
 

@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import Testing
 @testable import GuardianCore
 
@@ -254,4 +255,111 @@ import Testing
     #expect(blocked.map(\.id) == [legacy.id])
     #expect(try store.peekAllPending() == [armed])
     #expect(try store.blockedRequests() == [legacy])
+}
+
+@Test func corruptPendingRequestIsPreservedWithoutBlockingValidRecovery() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = RestartRequestStore(directory: directory)
+    let valid = RestartRequest(threadID: "valid-task")
+    try store.enqueue(valid)
+    let corruptURL = store.queueDirectory.appending(path: "corrupt.json")
+    let corruptData = Data("{not-json".utf8)
+    try corruptData.write(to: corruptURL)
+
+    #expect(try store.peekAllPending() == [valid])
+    #expect(!FileManager.default.fileExists(atPath: corruptURL.path))
+    let preserved = try FileManager.default.contentsOfDirectory(
+        at: store.blockedDirectory.appending(path: "corrupt", directoryHint: .isDirectory),
+        includingPropertiesForKeys: nil
+    )
+    #expect(preserved.count == 1)
+    #expect(try Data(contentsOf: preserved[0]) == corruptData)
+}
+
+@Test func queueIOFailureFailsClosedInsteadOfQuarantiningUnknownData() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = RestartRequestStore(directory: directory)
+    try store.enqueue(RestartRequest(threadID: "valid-task"))
+    let unreadableURL = store.queueDirectory.appending(
+        path: "unreadable.json",
+        directoryHint: .isDirectory
+    )
+    try FileManager.default.createDirectory(at: unreadableURL, withIntermediateDirectories: true)
+
+    #expect(throws: Error.self) {
+        try store.peekAllPending()
+    }
+    var isDirectory: ObjCBool = false
+    #expect(FileManager.default.fileExists(
+        atPath: unreadableURL.path,
+        isDirectory: &isDirectory
+    ))
+    #expect(isDirectory.boolValue)
+}
+
+@Test func concurrentContinuationLeaseHasExactlyOneOwner() async throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = RestartRequestStore(directory: directory)
+    let token = "31A25291-BDB6-44EF-AAB8-A95450F99A91"
+    let request = RestartRequest(
+        threadID: "exact-thread",
+        originToken: token,
+        continuationAutomationID: "guardian-recovery-test"
+    ).withHeartbeatObserved(at: Date(timeIntervalSince1970: 900))
+    try store.enqueue(request)
+    try store.claimPending(ids: [request.id])
+    try store.markClaimAwaitingContinuation(
+        id: request.id,
+        processIdentifier: 42,
+        restartedAt: Date(timeIntervalSince1970: 1_000)
+    )
+
+    let owners = await withTaskGroup(of: Bool.self, returning: Int.self) { group in
+        for _ in 0..<64 {
+            group.addTask {
+                await Task.yield()
+                return (try? RestartRequestStore(directory: directory).leaseContinuation(
+                    originToken: token,
+                    now: Date(timeIntervalSince1970: 1_001),
+                    leaseDuration: 300
+                ).isDelivery) == true
+            }
+        }
+        var count = 0
+        for await ownsLease in group where ownsLease {
+            count += 1
+        }
+        return count
+    }
+
+    #expect(owners == 1)
+}
+
+@Test func abandonedStateLockFailsWithABoundedBusyError() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let descriptor = open(
+        directory.appending(path: ".state.lock").path,
+        O_CREAT | O_RDWR,
+        S_IRUSR | S_IWUSR
+    )
+    #expect(descriptor >= 0)
+    #expect(flock(descriptor, LOCK_EX) == 0)
+    defer {
+        _ = flock(descriptor, LOCK_UN)
+        _ = close(descriptor)
+    }
+    let store = RestartRequestStore(directory: directory, lockTimeout: 0.02)
+
+    #expect(throws: RestartRequestStoreError.self) {
+        try store.peekAllPending()
+    }
 }

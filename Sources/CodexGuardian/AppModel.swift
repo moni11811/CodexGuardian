@@ -220,6 +220,19 @@ final class AppModel: ObservableObject {
                 currentProcessIDs: currentProcessIDs
             )
             if didRestart, let newProcessID {
+                self?.status = "Codex relaunched; waiting for app server"
+                let startupReady = await self?.waitForRecoveryStartup(
+                    processIdentifier: newProcessID,
+                    bundleIdentifier: request.targetBundleIdentifier,
+                    previousAppServerProcessIDs: appServerProcessIDs,
+                    applicationPaths: applicationPaths
+                ) ?? false
+                guard startupReady else {
+                    self?.status = "Codex relaunched; app server not ready"
+                    self?.automaticRecoveryBlocked = true
+                    self?.recoveryInProgress = false
+                    return
+                }
                 var openedTaskCount = 0
                 for recoveryRequest in requests where !recoveryRequest.threadID.isEmpty {
                     let opened = self?.runOpen(arguments: [
@@ -370,6 +383,32 @@ final class AppModel: ObservableObject {
         } catch {
             return []
         }
+    }
+
+    private func waitForRecoveryStartup(
+        processIdentifier: Int32,
+        bundleIdentifier: String,
+        previousAppServerProcessIDs: Set<Int32>,
+        applicationPaths: [String]
+    ) async -> Bool {
+        var tracker = CodexRecoveryStartupTracker()
+        for _ in 0..<150 {
+            let desktopIsRunning = NSRunningApplication.runningApplications(
+                withBundleIdentifier: bundleIdentifier
+            ).contains { $0.processIdentifier == processIdentifier }
+            let newAppServerProcessIDs = codexAppServerProcessIDs(
+                applicationPaths: applicationPaths
+            ).subtracting(previousAppServerProcessIDs)
+            if tracker.shouldStartContinuation(
+                desktopIsRunning: desktopIsRunning,
+                appServerIsRunning: !newAppServerProcessIDs.isEmpty,
+                now: Date()
+            ) {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        return false
     }
 
     private func stopCodexAppServers(
