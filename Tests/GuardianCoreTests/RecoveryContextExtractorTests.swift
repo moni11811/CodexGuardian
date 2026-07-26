@@ -19,3 +19,16 @@ import Testing
     #expect(!snapshot.contains(fakeCredential))
     #expect(snapshot.count <= RecoveryContextExtractor.maximumCharacters)
 }
+
+@Test func recoveryPromptSanitizerRemovesCredentialsAndPersonalPaths() {
+    let credential = "sk-" + String(repeating: "z", count: 30)
+    let personalPath = "/" + "Users/" + "PrivateName/project"
+    let prompt = "Retry with \(credential) from \(personalPath)"
+
+    let sanitized = RecoveryContextExtractor().sanitize(prompt, originToken: "")
+
+    #expect(!sanitized.contains(credential))
+    #expect(!sanitized.contains("PrivateName"))
+    #expect(sanitized.contains("[REDACTED]"))
+    #expect(sanitized.contains("/Users/[USER]"))
+}

@@ -2,17 +2,15 @@
 
 Codex Guardian is a small shield for Codex on your Mac.
 
-Sometimes an AI task freezes. Normally, you must reopen Codex, find the task, and explain what happened again. Guardian helps Codex restart itself and continue the same task.
+Sometimes an AI task gets stuck. Guardian helps it find the same task and try again without losing its place.
 
 ## What it does
 
-1. Codex notices that it is stuck.
-2. Codex asks Guardian for help.
-3. Guardian safely restarts Codex.
-4. Your Mac's private built-in AI reads a small, cleaned-up summary of what happened.
-5. Guardian reopens the correct desktop task and copies a useful “continue from here” message.
+When Codex can still respond, Guardian finds the exact task. Codex then uses its own built-in desktop command to send a “continue” message to that task. This is the normal recovery path. It does not restart the app.
 
-It can also queue several stuck tasks, so one task does not replace another.
+If Codex itself must restart, Guardian can close it, reopen the correct task, and copy a useful recovery message. macOS does not let this outside helper press Send inside Codex. You paste or send the copied message if needed.
+
+Guardian can queue several restart requests. One stuck task does not replace another.
 
 ## Install
 
@@ -26,13 +24,13 @@ Then restart Codex once. A shield appears in your Mac menu bar when Guardian is 
 
 If you are a developer or need help connecting Guardian, see [Technical Setup](TECHNICAL_SETUP.md).
 
-The included [Codex instructions](AGENTS.md) tell Codex to call Guardian itself when recovery is genuinely needed. Guardian restarts Codex and reopens the exact task without launching a second hidden Codex worker.
+The included [Codex instructions](AGENTS.md) teach Codex to use same-task recovery first. Guardian never launches a second hidden Codex worker.
 
 ## Is it safe?
 
-Guardian only restarts Codex when it can prove which task asked for help. If it cannot prove that, it stops instead.
+Guardian acts only when it can prove which task asked for help. If it cannot prove that, it stops.
 
-On supported Macs, the smart recovery message is created locally with Apple Intelligence. Guardian removes common secret patterns first and never sends this summary to an online AI service. If the local model is unavailable, Guardian uses a simple safe message instead.
+On supported Macs, restart recovery messages are created locally with Apple Intelligence. Guardian removes common secret patterns first and never sends this summary to an online AI service. If the local model is unavailable, Guardian uses a simple safe message instead.
 
 The project contains no API keys or accounts. Keep your own secrets out of bug reports and contributions.
 

@@ -39,6 +39,22 @@ private func resolveOrigin(_ token: String) throws -> RecoveryOrigin {
     throw lastError
 }
 
+private func recoveryPrompt(from arguments: [String: Any], originToken: String) -> String {
+    let supplied = arguments["recovery_prompt"] as? String
+    let prompt = supplied?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let selected = (prompt?.isEmpty == false) ? prompt! : RestartRequest.defaultPrompt
+    return RecoveryContextExtractor().sanitize(selected, originToken: originToken)
+}
+
+private func nativeRecoveryPayload(_ plan: NativeRecoveryPlan) -> [String: Any] {
+    [
+        "thread_id": plan.threadID,
+        "recovery_prompt": plan.recoveryPrompt,
+        "restarts_desktop": plan.restartsDesktop,
+        "next_action": "Call codex_app__send_message_to_thread now with thread_id and recovery_prompt, then end the current turn.",
+    ]
+}
+
 private func handle(_ message: [String: Any]) {
     guard let method = message["method"] as? String else { return }
     let id = message["id"] ?? NSNull()
@@ -50,7 +66,7 @@ private func handle(_ message: [String: Any]) {
         result(id: id, value: [
             "protocolVersion": requestedVersion,
             "capabilities": ["tools": [:]],
-            "serverInfo": ["name": "codex-guardian", "version": "0.1.0"],
+            "serverInfo": ["name": "codex-guardian", "version": "0.2.0"],
         ])
 
     case "notifications/initialized":
@@ -60,36 +76,73 @@ private func handle(_ message: [String: Any]) {
         result(id: id, value: [:])
 
     case "tools/list":
-        result(id: id, value: ["tools": [[
-            "name": "restart_codex",
-            "description": "Restart Codex after this call returns, then reopen the exact originating desktop task and copy its recovery prompt. Generate a fresh UUID for origin_token on every call.",
-            "inputSchema": [
-                "type": "object",
-                "properties": [
-                    "recovery_prompt": [
-                        "type": "string",
-                        "description": "Optional fallback instructions. Guardian uses the local Apple model to improve them from sanitized recent task state.",
+        let originToken: [String: Any] = [
+            "type": "string",
+            "format": "uuid",
+            "description": "Fresh UUID unique to this call. Guardian finds it in the originating rollout and binds recovery to that exact desktop task.",
+        ]
+        let fallbackPrompt: [String: Any] = [
+            "type": "string",
+            "description": "Optional fallback instructions. Never include credentials or private user data.",
+        ]
+        result(id: id, value: ["tools": [
+            [
+                "name": "prepare_recovery",
+                "description": "Resolve the exact originating desktop task without restarting Codex. Then call codex_app__send_message_to_thread with the returned thread_id and recovery_prompt. This is the preferred recovery path.",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "recovery_prompt": fallbackPrompt,
+                        "origin_token": originToken,
                     ],
-                    "origin_token": [
-                        "type": "string",
-                        "format": "uuid",
-                        "description": "Fresh UUID unique to this call. Guardian finds this token in the originating rollout and binds recovery to that exact task.",
-                    ],
-                    "delay_seconds": [
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 30,
-                        "default": 2,
-                    ],
+                    "required": ["origin_token"],
+                    "additionalProperties": false,
                 ],
-                "required": ["origin_token"],
-                "additionalProperties": false,
+                "outputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "thread_id": ["type": "string"],
+                        "recovery_prompt": ["type": "string"],
+                        "restarts_desktop": ["type": "boolean", "const": false],
+                        "next_action": ["type": "string"],
+                    ],
+                    "required": [
+                        "thread_id",
+                        "recovery_prompt",
+                        "restarts_desktop",
+                        "next_action",
+                    ],
+                    "additionalProperties": false,
+                ],
             ],
-        ]]])
+            [
+                "name": "restart_codex",
+                "description": "Hard-restart Codex after this call returns, reopen the exact originating desktop task, and copy a recovery prompt. This cannot submit a new turn automatically. Generate a fresh UUID for origin_token on every call.",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "recovery_prompt": [
+                            "type": "string",
+                            "description": "Optional fallback instructions. Guardian uses the local Apple model to improve them from sanitized recent task state.",
+                        ],
+                        "origin_token": originToken,
+                        "delay_seconds": [
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 30,
+                            "default": 2,
+                        ],
+                    ],
+                    "required": ["origin_token"],
+                    "additionalProperties": false,
+                ],
+            ],
+        ]])
 
     case "tools/call":
         guard let params = message["params"] as? [String: Any],
-              params["name"] as? String == "restart_codex" else {
+              let toolName = params["name"] as? String,
+              ["prepare_recovery", "restart_codex"].contains(toolName) else {
             writeError(id: id, code: -32602, message: "Unknown tool")
             return
         }
@@ -98,12 +151,30 @@ private func handle(_ message: [String: Any]) {
             writeError(id: id, code: -32602, message: "origin_token is required")
             return
         }
-        let suppliedPrompt = arguments["recovery_prompt"] as? String
-        let prompt = suppliedPrompt?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let fallbackPrompt = (prompt?.isEmpty == false) ? prompt! : RestartRequest.defaultPrompt
-        let delay = arguments["delay_seconds"] as? Int ?? 2
         do {
             let origin = try resolveOrigin(originToken)
+            let fallbackPrompt = recoveryPrompt(from: arguments, originToken: originToken)
+            if toolName == "prepare_recovery" {
+                let plan = NativeRecoveryPlan(
+                    threadID: origin.threadID,
+                    recoveryPrompt: fallbackPrompt
+                )
+                let payload = nativeRecoveryPayload(plan)
+                let data = try JSONSerialization.data(
+                    withJSONObject: payload,
+                    options: [.sortedKeys]
+                )
+                result(id: id, value: [
+                    "content": [[
+                        "type": "text",
+                        "text": String(decoding: data, as: UTF8.self),
+                    ]],
+                    "structuredContent": payload,
+                    "isError": false,
+                ])
+                return
+            }
+            let delay = arguments["delay_seconds"] as? Int ?? 2
             let request = RestartRequest(
                 threadID: origin.threadID,
                 recoveryPrompt: fallbackPrompt,

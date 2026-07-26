@@ -20,7 +20,10 @@ public struct ThreadOriginResolver: Sendable {
     }
 
     public static func defaultSessionsRoot() -> URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        if let override = ProcessInfo.processInfo.environment["CODEX_GUARDIAN_SESSIONS_DIR"] {
+            return URL(fileURLWithPath: override, isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
             .appending(path: ".codex/sessions", directoryHint: .isDirectory)
     }
 

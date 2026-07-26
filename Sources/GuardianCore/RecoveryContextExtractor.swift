@@ -39,7 +39,7 @@ public struct RecoveryContextExtractor: Sendable {
         }
     }
 
-    private func sanitize(_ input: String, originToken: String) -> String {
+    public func sanitize(_ input: String, originToken: String) -> String {
         var result = input.replacingOccurrences(of: originToken, with: "[ORIGIN]")
         let homePathPattern = "/" + "Users/" + #"[^/\s]+"#
         let patterns = [
