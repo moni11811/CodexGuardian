@@ -8,41 +8,93 @@ final class AppModel: ObservableObject {
     @Published private(set) var status = "Watching for MCP requests"
 
     private let store = RestartRequestStore()
+    private let activityScanner = CodexTaskActivityScanner()
+    private let quiescencePolicy = RestartQuiescencePolicy()
     private var timer: Timer?
     private var recoveryInProgress = false
 
     init() {
+        try? store.recoverClaims()
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.poll() }
         }
     }
 
     func requestManualRecovery() {
-        do {
-            try store.enqueue(RestartRequest())
-            status = "Restart scheduled"
-            poll()
-        } catch {
-            status = "Could not schedule: \(error.localizedDescription)"
-        }
+        guard !recoveryInProgress else { return }
+        recoveryInProgress = true
+        status = "Force restarting Codex"
+        restartCodex(using: [RestartRequest(delaySeconds: 1)])
     }
 
     private func poll() {
         guard !recoveryInProgress else { return }
         do {
-            let requests = try store.takeAllPending()
-            guard let first = requests.first else { return }
+            guard !(try store.peekAllPending()).isEmpty else { return }
             recoveryInProgress = true
-            status = "Restarting Codex in \(first.delaySeconds)s"
             Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .seconds(first.delaySeconds))
-                let laterRequests = (try? self?.store.takeAllPending()) ?? []
-                guard let self else { return }
-                let prepared = await self.prepareRecoveryPrompts(for: requests + laterRequests)
-                self.restartCodex(using: prepared)
+                await self?.waitForSafeRestart()
             }
         } catch {
             status = "Invalid request: \(error.localizedDescription)"
+        }
+    }
+
+    private func waitForSafeRestart() async {
+        while !Task.isCancelled {
+            do {
+                let requests = try store.peekAllPending()
+                guard let earliestRequest = requests.map(\.requestedAt).min() else {
+                    recoveryInProgress = false
+                    return
+                }
+                let scanner = activityScanner
+                let scanStart = activityScanStart(earliestRequest: earliestRequest)
+                let scan = try await Task.detached(priority: .utility) {
+                    try scanner.scan(modifiedSince: scanStart)
+                }.value
+                guard scan.isComplete else {
+                    status = "Restart paused: task scan incomplete"
+                    try? await Task.sleep(for: .seconds(1))
+                    continue
+                }
+
+                switch quiescencePolicy.decision(
+                    requests: requests,
+                    activities: scan.activities
+                ) {
+                case let .waitForTasks(threadIDs):
+                    status = "Waiting for \(threadIDs.count) active Codex task(s)"
+                case .waitForQuietPeriod:
+                    status = "Waiting for Codex tasks to become quiet"
+                case .restart:
+                    status = "Preparing recovery prompts"
+                    let prepared = await prepareRecoveryPrompts(for: requests)
+                    let currentRequests = try store.peekAllPending()
+                    guard Set(currentRequests.map(\.id)) == Set(requests.map(\.id)) else {
+                        status = "New recovery request found; checking tasks again"
+                        continue
+                    }
+                    let finalScan = try await Task.detached(priority: .utility) {
+                        try scanner.scan(modifiedSince: scanStart)
+                    }.value
+                    guard finalScan.isComplete,
+                          quiescencePolicy.decision(
+                            requests: currentRequests,
+                            activities: finalScan.activities
+                          ) == .restart else {
+                        status = "Task activity changed; restart postponed"
+                        continue
+                    }
+                    let claimedIDs = Set(requests.map(\.id))
+                    try store.claimPending(ids: claimedIDs)
+                    restartCodex(using: prepared, claimedRequestIDs: claimedIDs)
+                    return
+                }
+            } catch {
+                status = "Restart paused: cannot verify task activity"
+            }
+            try? await Task.sleep(for: .seconds(1))
         }
     }
 
@@ -69,9 +121,20 @@ final class AppModel: ObservableObject {
         return prepared
     }
 
-    private func restartCodex(using requests: [RestartRequest]) {
+    private func restartCodex(
+        using requests: [RestartRequest],
+        claimedRequestIDs: Set<UUID> = []
+    ) {
         guard let request = requests.first else {
             recoveryInProgress = false
+            return
+        }
+        if !claimedRequestIDs.isEmpty,
+           !automaticRestartStillSafe(requests: requests) {
+            try? store.recoverClaims()
+            status = "Task activity changed; restart postponed"
+            recoveryInProgress = false
+            poll()
             return
         }
         let pasteboard = NSPasteboard.general
@@ -121,8 +184,32 @@ final class AppModel: ObservableObject {
                     ? "Codex relaunched; exact task opened; prompt copied"
                     : "Codex relaunched; prompt copied")
                 : "Relaunch failed: Codex application not found"
+            if didLaunch {
+                try? self?.store.completeClaims(ids: claimedRequestIDs)
+            }
             self?.recoveryInProgress = false
         }
+    }
+
+    private func automaticRestartStillSafe(requests: [RestartRequest]) -> Bool {
+        guard let earliestRequest = requests.map(\.requestedAt).min() else { return false }
+        let scanStart = activityScanStart(earliestRequest: earliestRequest)
+        guard let scan = try? activityScanner.scan(modifiedSince: scanStart),
+              scan.isComplete else { return false }
+        return quiescencePolicy.decision(
+            requests: requests,
+            activities: scan.activities
+        ) == .restart
+    }
+
+    private func activityScanStart(earliestRequest: Date) -> Date {
+        let minimumLookback = earliestRequest.addingTimeInterval(
+            -quiescencePolicy.activityLookback
+        )
+        let codexLaunchDate = NSRunningApplication.runningApplications(
+            withBundleIdentifier: "com.openai.codex"
+        ).compactMap(\.launchDate).min()
+        return min(minimumLookback, codexLaunchDate ?? minimumLookback)
     }
 
     private func launchCodex(

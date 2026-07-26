@@ -8,7 +8,7 @@ struct CodexGuardianApp: App {
         MenuBarExtra("Codex Guardian", systemImage: "shield.fill") {
             Text(model.status)
             Divider()
-            Button("Recover Codex Now") {
+            Button("Force Restart Codex Now") {
                 model.requestManualRecovery()
             }
             Divider()

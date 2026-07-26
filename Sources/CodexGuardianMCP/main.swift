@@ -66,7 +66,7 @@ private func handle(_ message: [String: Any]) {
         result(id: id, value: [
             "protocolVersion": requestedVersion,
             "capabilities": ["tools": [:]],
-            "serverInfo": ["name": "codex-guardian", "version": "0.2.0"],
+            "serverInfo": ["name": "codex-guardian", "version": "0.3.0"],
         ])
 
     case "notifications/initialized":
@@ -117,7 +117,7 @@ private func handle(_ message: [String: Any]) {
             ],
             [
                 "name": "restart_codex",
-                "description": "Hard-restart Codex after this call returns, reopen the exact originating desktop task, and copy a recovery prompt. This cannot submit a new turn automatically. Generate a fresh UUID for origin_token on every call.",
+                "description": "Queue a hard Codex restart. Guardian waits until every observed Codex task is idle and quiet, then restarts, reopens the exact originating task, and copies a recovery prompt. This cannot submit a new turn automatically. Generate a fresh UUID for origin_token on every call.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [
@@ -186,7 +186,7 @@ private func handle(_ message: [String: Any]) {
             result(id: id, value: [
                 "content": [[
                     "type": "text",
-                    "text": "Codex restart scheduled in \(request.delaySeconds) seconds. Guardian will reopen exact task \(origin.threadID) and copy a private on-device recovery prompt. Detached CLI continuation is disabled to prevent access prompts.",
+                    "text": "Codex restart queued. Guardian will wait until all observed Codex tasks are idle and quiet, then reopen exact task \(origin.threadID) and copy a private on-device recovery prompt. Detached CLI continuation is disabled to prevent access prompts.",
                 ]],
                 "isError": false,
             ])

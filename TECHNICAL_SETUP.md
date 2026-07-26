@@ -54,7 +54,9 @@ restart_codex(
 )
 ```
 
-Guardian locates the rollout containing `origin_token` and extracts the exact task ID. Hard restart requests are queued; Guardian restarts Codex once, opens `codex://threads/<TASK_ID>`, and copies the prompt. A hard restart cannot submit a new turn. Guardian never launches detached `codex exec resume` workers. If the origin cannot be proven, the MCP call fails without restarting Codex.
+Guardian locates the rollout containing `origin_token` and extracts the exact task ID. Hard restart requests remain on disk while Guardian reads bounded rollout headers/tails. It scans every rollout changed since the current Codex process launched, with at least a 12-hour lookback. Any non-terminal task blocks restart. More than 200 candidates, malformed state, or scanner failure also blocks restart. Once every observed task is terminal and no rollout changes for 15 seconds, Guardian claims the exact queue snapshot, checks activity again, restarts Codex once, opens `codex://threads/<TASK_ID>`, and copies the prompt. Unfinished claims recover after Guardian relaunch. A hard restart cannot submit a new turn. Guardian never launches detached `codex exec resume` workers. If the origin cannot be proven, the MCP call fails without restarting Codex.
+
+The menu-bar **Force Restart Codex Now** action bypasses this gate only after a person explicitly clicks it.
 
 ## Smart recovery
 

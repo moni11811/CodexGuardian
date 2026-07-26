@@ -18,9 +18,12 @@ Use `restart_codex` only when Codex cannot make progress without restarting its 
 
 1. Generate a fresh UUID and place it in the current task immediately before the MCP call.
 2. Call `restart_codex` with that UUID as `origin_token`.
-3. Guardian restarts Codex, reopens the exact task, and copies the recovery prompt.
+3. Guardian waits while any observed Codex task is active.
+4. After every task is idle and Codex has been quiet for 15 seconds, Guardian restarts Codex, reopens the exact task, and copies the recovery prompt.
 
 A hard restart cannot submit the copied prompt. Never claim that it continued automatically.
+
+Never bypass the quiet-task gate automatically. The shield menu has an explicit **Force Restart Codex Now** button for a person to use when task state cannot be trusted.
 
 `recovery_prompt` is optional. Provide it only when a precise deterministic fallback is better than Guardian's default. Never place credentials or private user data in it.
 

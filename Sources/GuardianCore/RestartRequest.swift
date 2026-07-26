@@ -77,6 +77,49 @@ public struct RestartRequestStore: Sendable {
         return pending.map(\.request)
     }
 
+    public func peekAllPending() throws -> [RestartRequest] {
+        try pendingRequests().map(\.request)
+    }
+
+    public func claimPending(ids: Set<UUID>) throws {
+        try FileManager.default.createDirectory(
+            at: claimedDirectory,
+            withIntermediateDirectories: true
+        )
+        let matching = try pendingRequests().filter { ids.contains($0.request.id) }
+        guard Set(matching.map(\.request.id)) == ids else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        for pending in matching {
+            let destination = claimedDirectory.appending(path: pending.url.lastPathComponent)
+            try FileManager.default.moveItem(at: pending.url, to: destination)
+        }
+    }
+
+    public func recoverClaims() throws {
+        guard FileManager.default.fileExists(atPath: claimedDirectory.path) else { return }
+        try FileManager.default.createDirectory(at: queueDirectory, withIntermediateDirectories: true)
+        for url in try claimURLs() {
+            var destination = queueDirectory.appending(path: url.lastPathComponent)
+            if FileManager.default.fileExists(atPath: destination.path) {
+                destination = queueDirectory.appending(path: "recovered-\(UUID().uuidString).json")
+            }
+            try FileManager.default.moveItem(at: url, to: destination)
+        }
+    }
+
+    public func completeClaims(ids: Set<UUID>) throws {
+        for url in try claimURLs() {
+            let request = try JSONDecoder().decode(
+                RestartRequest.self,
+                from: Data(contentsOf: url)
+            )
+            if ids.contains(request.id) {
+                try FileManager.default.removeItem(at: url)
+            }
+        }
+    }
+
     public var pendingURL: URL {
         directory.appending(path: "pending-restart.json")
     }
@@ -85,9 +128,21 @@ public struct RestartRequestStore: Sendable {
         directory.appending(path: "pending", directoryHint: .isDirectory)
     }
 
+    public var claimedDirectory: URL {
+        directory.appending(path: "claimed", directoryHint: .isDirectory)
+    }
+
     private func requestURL(for request: RestartRequest) -> URL {
         let timestamp = String(format: "%020.6f", request.requestedAt.timeIntervalSince1970)
         return queueDirectory.appending(path: "\(timestamp)-\(request.id.uuidString).json")
+    }
+
+    private func claimURLs() throws -> [URL] {
+        guard FileManager.default.fileExists(atPath: claimedDirectory.path) else { return [] }
+        return try FileManager.default.contentsOfDirectory(
+            at: claimedDirectory,
+            includingPropertiesForKeys: nil
+        ).filter { $0.pathExtension == "json" }
     }
 
     private func pendingRequests() throws -> [(url: URL, request: RestartRequest)] {

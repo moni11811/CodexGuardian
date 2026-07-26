@@ -24,6 +24,7 @@ grep -q '"required":\["origin_token"\]' <<<"$OUTPUT"
 grep -q 'sanitized recent task state' <<<"$OUTPUT"
 grep -q 'codex_app__send_message_to_thread' <<<"$OUTPUT"
 grep -q 'cannot submit a new turn automatically' <<<"$OUTPUT"
+grep -q 'every observed Codex task is idle and quiet' <<<"$OUTPUT"
 if grep -q '"required":\["origin_token","recovery_prompt"\]' <<<"$OUTPUT"; then
   echo "MCP still requires a manually written recovery prompt" >&2
   exit 1

@@ -46,3 +46,49 @@ import Testing
 
     #expect(try store.takeAllPending() == [first, second])
 }
+
+@Test func pendingRequestsCanBeObservedWithoutRemovingThem() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    let store = RestartRequestStore(directory: directory)
+    let request = RestartRequest(threadID: "working-task")
+
+    try store.enqueue(request)
+
+    #expect(try store.peekAllPending() == [request])
+    #expect(try store.takeAllPending() == [request])
+}
+
+@Test func claimingAReadySnapshotLeavesNewerRequestsQueued() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    let store = RestartRequestStore(directory: directory)
+    let first = RestartRequest(
+        requestedAt: Date(timeIntervalSince1970: 1_000),
+        threadID: "first-task"
+    )
+    let later = RestartRequest(
+        requestedAt: Date(timeIntervalSince1970: 1_001),
+        threadID: "later-task"
+    )
+    try store.enqueue(first)
+    try store.enqueue(later)
+
+    try store.claimPending(ids: [first.id])
+
+    #expect(try store.peekAllPending() == [later])
+}
+
+@Test func unfinishedClaimsRecoverAfterGuardianRelaunch() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    let store = RestartRequestStore(directory: directory)
+    let request = RestartRequest(threadID: "claimed-task")
+    try store.enqueue(request)
+    try store.claimPending(ids: [request.id])
+
+    let relaunchedStore = RestartRequestStore(directory: directory)
+    try relaunchedStore.recoverClaims()
+
+    #expect(try relaunchedStore.peekAllPending() == [request])
+}
