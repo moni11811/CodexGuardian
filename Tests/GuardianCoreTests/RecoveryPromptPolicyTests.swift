@@ -14,3 +14,10 @@ import Testing
 
     #expect(RecoveryPromptPolicy().select(generated: generated, fallback: fallback) == generated)
 }
+
+@Test func recoveryControlCommandFallsBackInsteadOfRestartingAgain() {
+    let fallback = "Continue the exact task after recovery."
+    let generated = "Run restart_codex with the previous origin token, then verify recovery."
+
+    #expect(RecoveryPromptPolicy().select(generated: generated, fallback: fallback) == fallback)
+}

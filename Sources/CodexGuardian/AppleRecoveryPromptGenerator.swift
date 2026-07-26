@@ -23,6 +23,8 @@ struct AppleRecoveryPromptGenerator {
             You recover a stuck coding agent. Write one concise continuation prompt.
             Use only supplied facts. Name the last known task, failure, and one changed next action.
             Never repeat secrets, invent completed work, or claim success. Output only the prompt.
+            The desktop restart already happened. Never request another restart, recovery tool,
+            heartbeat, origin token, automation, or acknowledgement. Resume project work only.
             """
         )
         do {

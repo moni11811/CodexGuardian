@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import Darwin
 import Foundation
 import GuardianCore
 
@@ -180,6 +181,13 @@ final class AppModel: ObservableObject {
             withBundleIdentifier: request.targetBundleIdentifier
         )
         let previousProcessIDs = Set(running.map(\.processIdentifier))
+        var applicationPaths = launchPlan.fallbackApplicationPaths
+        if let resolvedApplicationURL {
+            applicationPaths.append(resolvedApplicationURL.path)
+        }
+        let appServerProcessIDs = codexAppServerProcessIDs(
+            applicationPaths: applicationPaths
+        )
         running.forEach { $0.terminate() }
         status = "Stopping Codex"
 
@@ -192,6 +200,11 @@ final class AppModel: ObservableObject {
             ).isEmpty {
                 try? await Task.sleep(for: .milliseconds(250))
             }
+
+            await self?.stopCodexAppServers(
+                capturedProcessIDs: appServerProcessIDs,
+                applicationPaths: applicationPaths
+            )
 
             let didLaunch = await self?.launchCodex(
                 plan: launchPlan,
@@ -341,6 +354,41 @@ final class AppModel: ObservableObject {
         } catch {
             return false
         }
+    }
+
+    private func codexAppServerProcessIDs(applicationPaths: [String]) -> Set<Int32> {
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/ps")
+        process.arguments = ["-axo", "pid=,command="]
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return [] }
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            guard data.count <= 2_000_000,
+                  let processList = String(data: data, encoding: .utf8) else { return [] }
+            return CodexAppServerProcessPolicy().processIDsToStop(
+                processList: processList,
+                applicationPaths: applicationPaths
+            )
+        } catch {
+            return []
+        }
+    }
+
+    private func stopCodexAppServers(
+        capturedProcessIDs: Set<Int32>,
+        applicationPaths: [String]
+    ) async {
+        let stillMatching = codexAppServerProcessIDs(applicationPaths: applicationPaths)
+        let targets = capturedProcessIDs.intersection(stillMatching)
+        targets.forEach { Darwin.kill($0, SIGTERM) }
+        try? await Task.sleep(for: .seconds(1))
+        let remaining = codexAppServerProcessIDs(applicationPaths: applicationPaths)
+        targets.intersection(remaining).forEach { Darwin.kill($0, SIGKILL) }
     }
 }
 
