@@ -92,3 +92,146 @@ import Testing
 
     #expect(try relaunchedStore.peekAllPending() == [request])
 }
+
+@Test func deliveredRestartWaitsForNativeHeartbeatAcknowledgement() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    let store = RestartRequestStore(directory: directory)
+    let request = RestartRequest(
+        threadID: "exact-thread",
+        originToken: "31A25291-BDB6-44EF-AAB8-A95450F99A91",
+        continuationAutomationID: "guardian-recovery-test"
+    ).withHeartbeatObserved(at: Date(timeIntervalSince1970: 900))
+    try store.enqueue(request)
+    try store.claimPending(ids: [request.id])
+    try store.markClaimAwaitingContinuation(
+        id: request.id,
+        processIdentifier: 42,
+        restartedAt: Date(timeIntervalSince1970: 1_000)
+    )
+
+    try store.recoverClaims()
+
+    #expect(try store.peekAllPending().isEmpty)
+    #expect(try store.request(originToken: request.originToken!)?.recoveryPhase == .awaitingContinuation)
+    #expect(try store.leaseContinuation(originToken: request.originToken!).isDelivery)
+    #expect(try store.acknowledgeContinuation(originToken: request.originToken!) == request.id)
+    #expect(try store.request(originToken: request.originToken!) == nil)
+}
+
+@Test func preparedRecoveryPromptSurvivesUntilHeartbeatDelivery() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    let store = RestartRequestStore(directory: directory)
+    let request = RestartRequest(
+        threadID: "exact-thread",
+        recoveryPrompt: "Fallback",
+        originToken: "31A25291-BDB6-44EF-AAB8-A95450F99A91",
+        continuationAutomationID: "guardian-recovery-test"
+    ).withHeartbeatObserved(at: Date(timeIntervalSince1970: 900))
+    try store.enqueue(request)
+    try store.claimPending(ids: [request.id])
+
+    try store.updateClaimedRequests([
+        request.withRecoveryPrompt("Locally prepared continuation"),
+    ])
+    try store.markClaimAwaitingContinuation(
+        id: request.id,
+        processIdentifier: 42,
+        restartedAt: Date(timeIntervalSince1970: 1_000)
+    )
+
+    #expect(try store.request(originToken: request.originToken!)?.recoveryPrompt
+        == "Locally prepared continuation")
+}
+
+@Test func repeatedOriginTokenIsIdempotentAndConflictFailsClosed() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    let store = RestartRequestStore(directory: directory)
+    let token = "31A25291-BDB6-44EF-AAB8-A95450F99A91"
+    let first = RestartRequest(
+        threadID: "exact-thread",
+        originToken: token,
+        continuationAutomationID: "same-heartbeat"
+    )
+    let retry = RestartRequest(
+        threadID: "exact-thread",
+        originToken: token,
+        continuationAutomationID: "same-heartbeat"
+    )
+
+    let firstID = try store.enqueueUnique(first)
+    let retryID = try store.enqueueUnique(retry)
+
+    #expect(firstID == retryID)
+    #expect(try store.peekAllPending().count == 1)
+    #expect(throws: RestartRequestStoreError.self) {
+        try store.enqueueUnique(RestartRequest(
+            threadID: "exact-thread",
+            originToken: token,
+            continuationAutomationID: "different-heartbeat"
+        ))
+    }
+}
+
+@Test func continuationDeliveryUsesAnExpiringSingleOwnerLease() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    let store = RestartRequestStore(directory: directory)
+    let token = "31A25291-BDB6-44EF-AAB8-A95450F99A91"
+    let request = RestartRequest(
+        threadID: "exact-thread",
+        originToken: token,
+        continuationAutomationID: "guardian-recovery-test"
+    ).withHeartbeatObserved(at: Date(timeIntervalSince1970: 900))
+    try store.enqueue(request)
+    try store.claimPending(ids: [request.id])
+    try store.markClaimAwaitingContinuation(
+        id: request.id,
+        processIdentifier: 42,
+        restartedAt: Date(timeIntervalSince1970: 1_000)
+    )
+
+    let first = try store.leaseContinuation(
+        originToken: token,
+        now: Date(timeIntervalSince1970: 1_001),
+        leaseDuration: 300
+    )
+    let overlap = try store.leaseContinuation(
+        originToken: token,
+        now: Date(timeIntervalSince1970: 1_002),
+        leaseDuration: 300
+    )
+    let retry = try store.leaseContinuation(
+        originToken: token,
+        now: Date(timeIntervalSince1970: 1_302),
+        leaseDuration: 300
+    )
+
+    #expect(first.isDelivery)
+    #expect(!overlap.isDelivery)
+    #expect(retry.isDelivery)
+}
+
+@Test func desktopLaunchAloneCannotReleaseContinuation() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    let store = RestartRequestStore(directory: directory)
+    let request = RestartRequest(
+        threadID: "exact-thread",
+        originToken: "31A25291-BDB6-44EF-AAB8-A95450F99A91",
+        continuationAutomationID: "guardian-recovery-test"
+    )
+    try store.enqueue(request)
+    try store.claimPending(ids: [request.id])
+
+    #expect(throws: RestartRequestStoreError.self) {
+        try store.markClaimAwaitingContinuation(
+            id: request.id,
+            processIdentifier: 42,
+            restartedAt: Date(timeIntervalSince1970: 1_000)
+        )
+    }
+    #expect(try store.request(originToken: request.originToken!)?.recoveryPhase == .claimed)
+}

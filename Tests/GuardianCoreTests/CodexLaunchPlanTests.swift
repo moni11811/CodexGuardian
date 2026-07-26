@@ -15,6 +15,13 @@ import Testing
     #expect(policy.isRecovered(openSucceeded: true, applicationIsRunning: true))
 }
 
+@Test func hardRecoveryRequiresANewCodexProcess() {
+    let policy = CodexRelaunchPolicy()
+
+    #expect(!policy.didRestart(previousProcessIDs: [41], currentProcessIDs: [41]))
+    #expect(policy.didRestart(previousProcessIDs: [41], currentProcessIDs: [42]))
+}
+
 @Test func continuationWaitsForVerifiedDesktopRelaunch() {
     let policy = CodexRecoveryStartupPolicy()
 

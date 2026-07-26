@@ -8,7 +8,7 @@ Sometimes an AI task gets stuck. Guardian helps it find the same task and try ag
 
 When Codex can still respond, Guardian finds the exact task. Codex then uses its own built-in desktop command to send a “continue” message to that task. This is the normal recovery path. It does not restart the app.
 
-If Codex itself must restart, Guardian first watches the other Codex tasks. It waits until they have all stopped working and the app has been quiet for 15 seconds. Then it closes Codex, reopens the correct task, and copies a useful recovery message. macOS does not let this outside helper press Send inside Codex. You paste or send the copied message if needed.
+If Codex itself must restart, Guardian first gives the exact task a small automatic “are we back?” reminder. Guardian refuses to restart unless that reminder is safely ready. It then waits until every Codex task has stopped working and the app has been quiet for 15 seconds. After Codex reopens, the reminder continues the correct task automatically. No copy, paste, or Send step.
 
 If Guardian cannot tell whether a task is finished, it waits. The shield menu has a clearly named force-restart button for emergencies.
 

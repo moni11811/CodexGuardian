@@ -21,6 +21,19 @@ import Foundation
     #expect(!plan.usesDetachedCLI)
 }
 
+@Test func hardRecoveryDoesNotRequireAHumanToPressSend() {
+    let request = RestartRequest(
+        threadID: "019f0000-0000-7000-8000-000000000002",
+        recoveryPrompt: "Continue exact task",
+        delaySeconds: 2
+    )
+
+    let plan = CodexResumePlan(request: request)
+
+    #expect(plan.deliveryMode == .nativeRecoveryHeartbeat)
+    #expect(!plan.requiresManualSend)
+}
+
 @Test func continuationLauncherRefusesDetachedResumeCommand() throws {
     let request = RestartRequest(
         threadID: "019f0000-0000-7000-8000-000000000002",

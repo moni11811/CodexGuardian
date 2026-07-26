@@ -17,11 +17,15 @@ This path does not restart Codex. It is the only path that can submit an automat
 Use `restart_codex` only when Codex cannot make progress without restarting its desktop runtime.
 
 1. Generate a fresh UUID and place it in the current task immediately before the MCP call.
-2. Call `restart_codex` with that UUID as `origin_token`.
-3. Guardian waits while any observed Codex task is active.
-4. After every task is idle and Codex has been quiet for 15 seconds, Guardian restarts Codex, reopens the exact task, and copies the recovery prompt.
+2. Call `prepare_restart` with that UUID as `origin_token`.
+3. Create an ACTIVE one-minute Codex heartbeat with `codex_app__automation_update`. Use the returned `thread_id` as `targetThreadId` and `heartbeat_prompt` as its prompt.
+4. Call `restart_codex` with the same `origin_token` and the returned automation id as `continuation_automation_id`.
+5. End the turn. Guardian waits while any observed Codex task is active.
+6. After every task is idle and Codex has been quiet for 15 seconds, Guardian restarts Codex. The heartbeat calls `recovery_tick` and continues the exact task after relaunch.
 
-A hard restart cannot submit the copied prompt. Never claim that it continued automatically.
+If `recovery_tick` says `waiting`, end that heartbeat run. If it says `continue`, follow `recovery_prompt`. After meaningful progress, delete or pause the returned `automation_id` with `codex_app__automation_update`, then call `ack_recovery`.
+
+Guardian must fail closed if the exact-task heartbeat cannot be created or verified. Never restart first and promise a later continuation.
 
 Never bypass the quiet-task gate automatically. The shield menu has an explicit **Force Restart Codex Now** button for a person to use when task state cannot be trusted.
 

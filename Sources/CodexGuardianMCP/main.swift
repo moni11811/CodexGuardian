@@ -3,6 +3,7 @@ import GuardianCore
 
 private let store = RestartRequestStore()
 private let originResolver = ThreadOriginResolver()
+private let automationVerifier = CodexRecoveryAutomationVerifier()
 
 private func write(_ object: [String: Any]) {
     guard JSONSerialization.isValidJSONObject(object),
@@ -55,6 +56,38 @@ private func nativeRecoveryPayload(_ plan: NativeRecoveryPlan) -> [String: Any] 
     ]
 }
 
+private func hardRecoveryHeartbeatPrompt(originToken: String) -> String {
+    """
+    Codex Guardian hard-recovery heartbeat \(originToken). Call the Codex Guardian recovery_tick tool with this origin_token. If state is waiting, end this run. If state is continue, follow recovery_prompt in this exact task. After meaningful progress, delete the heartbeat whose automation_id is returned, then call ack_recovery with the same origin_token.
+    """
+}
+
+private func hardRecoveryPreparationPayload(
+    threadID: String,
+    originToken: String
+) -> [String: Any] {
+    [
+        "thread_id": threadID,
+        "origin_token": originToken,
+        "heartbeat_prompt": hardRecoveryHeartbeatPrompt(originToken: originToken),
+        "heartbeat_interval_minutes": 1,
+        "restarts_desktop": false,
+        "next_action": "Create an ACTIVE Codex heartbeat for thread_id using heartbeat_prompt and a one-minute interval. Then call restart_codex with origin_token and the returned automation id.",
+    ]
+}
+
+private func toolResult(id: Any, payload: [String: Any]) throws {
+    let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+    result(id: id, value: [
+        "content": [[
+            "type": "text",
+            "text": String(decoding: data, as: UTF8.self),
+        ]],
+        "structuredContent": payload,
+        "isError": false,
+    ])
+}
+
 private func handle(_ message: [String: Any]) {
     guard let method = message["method"] as? String else { return }
     let id = message["id"] ?? NSNull()
@@ -66,7 +99,7 @@ private func handle(_ message: [String: Any]) {
         result(id: id, value: [
             "protocolVersion": requestedVersion,
             "capabilities": ["tools": [:]],
-            "serverInfo": ["name": "codex-guardian", "version": "0.3.0"],
+            "serverInfo": ["name": "codex-guardian", "version": "0.4.0"],
         ])
 
     case "notifications/initialized":
@@ -116,8 +149,21 @@ private func handle(_ message: [String: Any]) {
                 ],
             ],
             [
+                "name": "prepare_restart",
+                "description": "Prepare automatic exact-task continuation before a hard restart. Create the returned Codex heartbeat first; restart_codex fails closed without it.",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "recovery_prompt": fallbackPrompt,
+                        "origin_token": originToken,
+                    ],
+                    "required": ["origin_token"],
+                    "additionalProperties": false,
+                ],
+            ],
+            [
                 "name": "restart_codex",
-                "description": "Queue a hard Codex restart. Guardian waits until every observed Codex task is idle and quiet, then restarts, reopens the exact originating task, and copies a recovery prompt. This cannot submit a new turn automatically. Generate a fresh UUID for origin_token on every call.",
+                "description": "Queue a hard Codex restart only after prepare_restart and an exact-task Codex heartbeat. Guardian verifies the heartbeat, waits until every observed task is idle and quiet, then restarts. The heartbeat continues the exact task after relaunch.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [
@@ -126,6 +172,10 @@ private func handle(_ message: [String: Any]) {
                             "description": "Optional fallback instructions. Guardian uses the local Apple model to improve them from sanitized recent task state.",
                         ],
                         "origin_token": originToken,
+                        "continuation_automation_id": [
+                            "type": "string",
+                            "description": "Automation id returned by the ACTIVE exact-task Codex heartbeat created from prepare_restart.",
+                        ],
                         "delay_seconds": [
                             "type": "integer",
                             "minimum": 1,
@@ -133,6 +183,26 @@ private func handle(_ message: [String: Any]) {
                             "default": 2,
                         ],
                     ],
+                    "required": ["origin_token", "continuation_automation_id"],
+                    "additionalProperties": false,
+                ],
+            ],
+            [
+                "name": "recovery_tick",
+                "description": "Heartbeat check for an armed hard recovery. Returns waiting before relaunch or the exact recovery prompt after relaunch.",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": ["origin_token": originToken],
+                    "required": ["origin_token"],
+                    "additionalProperties": false,
+                ],
+            ],
+            [
+                "name": "ack_recovery",
+                "description": "Acknowledge that the exact task is moving again. Delete or pause the returned heartbeat automation first, then call this after meaningful recovered progress.",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": ["origin_token": originToken],
                     "required": ["origin_token"],
                     "additionalProperties": false,
                 ],
@@ -142,54 +212,151 @@ private func handle(_ message: [String: Any]) {
     case "tools/call":
         guard let params = message["params"] as? [String: Any],
               let toolName = params["name"] as? String,
-              ["prepare_recovery", "restart_codex"].contains(toolName) else {
+              [
+                "prepare_recovery",
+                "prepare_restart",
+                "restart_codex",
+                "recovery_tick",
+                "ack_recovery",
+              ].contains(toolName) else {
             writeError(id: id, code: -32602, message: "Unknown tool")
             return
         }
         let arguments = params["arguments"] as? [String: Any] ?? [:]
-        guard let originToken = arguments["origin_token"] as? String else {
+        guard let originToken = arguments["origin_token"] as? String,
+              UUID(uuidString: originToken) != nil else {
             writeError(id: id, code: -32602, message: "origin_token is required")
             return
         }
         do {
-            let origin = try resolveOrigin(originToken)
-            let fallbackPrompt = recoveryPrompt(from: arguments, originToken: originToken)
-            if toolName == "prepare_recovery" {
+            switch toolName {
+            case "prepare_recovery":
+                let origin = try resolveOrigin(originToken)
+                let fallbackPrompt = recoveryPrompt(from: arguments, originToken: originToken)
                 let plan = NativeRecoveryPlan(
                     threadID: origin.threadID,
                     recoveryPrompt: fallbackPrompt
                 )
-                let payload = nativeRecoveryPayload(plan)
-                let data = try JSONSerialization.data(
-                    withJSONObject: payload,
-                    options: [.sortedKeys]
+                try toolResult(id: id, payload: nativeRecoveryPayload(plan))
+
+            case "prepare_restart":
+                let origin = try resolveOrigin(originToken)
+                try toolResult(
+                    id: id,
+                    payload: hardRecoveryPreparationPayload(
+                        threadID: origin.threadID,
+                        originToken: originToken
+                    )
                 )
-                result(id: id, value: [
-                    "content": [[
-                        "type": "text",
-                        "text": String(decoding: data, as: UTF8.self),
-                    ]],
-                    "structuredContent": payload,
-                    "isError": false,
+
+            case "restart_codex":
+                let origin = try resolveOrigin(originToken)
+                guard let automationID = arguments["continuation_automation_id"] as? String,
+                      try automationVerifier.isArmed(
+                        automationID: automationID,
+                        threadID: origin.threadID,
+                        originToken: originToken
+                      ) else {
+                    writeError(
+                        id: id,
+                        code: -32602,
+                        message: "Exact-task recovery heartbeat is not durably armed; Codex was not queued for restart."
+                    )
+                    return
+                }
+                let fallbackPrompt = recoveryPrompt(from: arguments, originToken: originToken)
+                let delay = arguments["delay_seconds"] as? Int ?? 2
+                let request = RestartRequest(
+                    threadID: origin.threadID,
+                    recoveryPrompt: fallbackPrompt,
+                    contextSnapshot: origin.contextSnapshot,
+                    delaySeconds: delay,
+                    originToken: originToken,
+                    continuationAutomationID: automationID
+                )
+                let requestID = try store.enqueueUnique(request)
+                launchGuardianIfNeeded()
+                try toolResult(id: id, payload: [
+                    "state": "queued",
+                    "request_id": requestID.uuidString,
+                    "thread_id": origin.threadID,
+                    "automation_id": automationID,
+                    "next_action": "End this turn. Guardian waits for all tasks and the quiet period. The native heartbeat continues this exact task after relaunch.",
                 ])
-                return
+
+            case "recovery_tick":
+                guard let request = try store.request(originToken: originToken) else {
+                    try toolResult(id: id, payload: [
+                        "state": "waiting",
+                        "reason": "restart_not_armed_yet",
+                    ])
+                    return
+                }
+                if request.recoveryPhase == .queued {
+                    _ = try store.markHeartbeatObserved(originToken: originToken)
+                    try toolResult(id: id, payload: [
+                        "state": "waiting",
+                        "thread_id": request.threadID,
+                        "reason": "heartbeat_registered; desktop_restart_not_complete",
+                    ])
+                    return
+                }
+                let lease = try store.leaseContinuation(originToken: originToken)
+                guard let delivery = lease.request else {
+                    try toolResult(id: id, payload: [
+                        "state": "waiting",
+                        "thread_id": request.threadID,
+                        "reason": request.recoveryPhase == .deliveringContinuation
+                            ? "continuation_delivery_already_running"
+                            : "desktop_restart_not_complete",
+                    ])
+                    return
+                }
+                try toolResult(id: id, payload: [
+                    "state": "continue",
+                    "thread_id": delivery.threadID,
+                    "recovery_prompt": delivery.recoveryPrompt,
+                    "automation_id": delivery.continuationAutomationID ?? "",
+                    "next_action": "Continue now in this exact task. After meaningful progress, delete or pause automation_id, then call ack_recovery with origin_token.",
+                ])
+
+            case "ack_recovery":
+                guard let delivered = try store.request(originToken: originToken),
+                      let automationID = delivered.continuationAutomationID else {
+                    writeError(id: id, code: -32602, message: "Recovery request was not found.")
+                    return
+                }
+                if try automationVerifier.isArmed(
+                    automationID: automationID,
+                    threadID: delivered.threadID,
+                    originToken: originToken
+                ) {
+                    writeError(
+                        id: id,
+                        code: -32602,
+                        message: "Delete or pause the recovery heartbeat before acknowledgement."
+                    )
+                    return
+                }
+                guard let requestID = try store.acknowledgeContinuation(
+                    originToken: originToken
+                ) else {
+                    writeError(
+                        id: id,
+                        code: -32602,
+                        message: "No delivered hard recovery is awaiting acknowledgement."
+                    )
+                    return
+                }
+                try toolResult(id: id, payload: [
+                    "state": "acknowledged",
+                    "request_id": requestID.uuidString,
+                    "automation_id": automationID,
+                ])
+
+            default:
+                writeError(id: id, code: -32602, message: "Unknown tool")
             }
-            let delay = arguments["delay_seconds"] as? Int ?? 2
-            let request = RestartRequest(
-                threadID: origin.threadID,
-                recoveryPrompt: fallbackPrompt,
-                contextSnapshot: origin.contextSnapshot,
-                delaySeconds: delay
-            )
-            try store.enqueue(request)
-            launchGuardianIfNeeded()
-            result(id: id, value: [
-                "content": [[
-                    "type": "text",
-                    "text": "Codex restart queued. Guardian will wait until all observed Codex tasks are idle and quiet, then reopen exact task \(origin.threadID) and copy a private on-device recovery prompt. Detached CLI continuation is disabled to prevent access prompts.",
-                ]],
-                "isError": false,
-            ])
         } catch {
             writeError(id: id, code: -32603, message: error.localizedDescription)
         }

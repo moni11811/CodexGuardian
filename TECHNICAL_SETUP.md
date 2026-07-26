@@ -47,14 +47,24 @@ The MCP result contains `thread_id` and `recovery_prompt`. Codex must immediatel
 Hard restart:
 
 ```text
+prepare_restart(
+  origin_token: "GENERATE-A-FRESH-UUID-FOR-EACH-CALL"
+)
+
+# Create the returned exact-thread ACTIVE heartbeat with Codex's
+# automation tool. Then use its automation id:
+
 restart_codex(
   origin_token: "GENERATE-A-FRESH-UUID-FOR-EACH-CALL",
+  continuation_automation_id: "AUTOMATION-ID-FROM-CODEX",
   recovery_prompt: "Continue this task. The previous tool call became stuck. Do not repeat the unchanged method; inspect current state and use a fallback.",
   delay_seconds: 2
 )
 ```
 
-Guardian locates the rollout containing `origin_token` and extracts the exact task ID. Hard restart requests remain on disk while Guardian reads bounded rollout headers/tails. It scans every rollout changed since the current Codex process launched, with at least a 12-hour lookback. Any non-terminal task blocks restart. More than 200 candidates, malformed state, or scanner failure also blocks restart. Once every observed task is terminal and no rollout changes for 15 seconds, Guardian claims the exact queue snapshot, checks activity again, restarts Codex once, opens `codex://threads/<TASK_ID>`, and copies the prompt. Unfinished claims recover after Guardian relaunch. A hard restart cannot submit a new turn. Guardian never launches detached `codex exec resume` workers. If the origin cannot be proven, the MCP call fails without restarting Codex.
+Guardian locates the rollout containing `origin_token` and extracts the exact task ID. `prepare_restart` returns a heartbeat prompt for that task. Codex creates the heartbeat through its native automation tool. `restart_codex` reads the saved automation and fails closed unless it is active, targets the exact task, and contains the same UUID.
+
+Hard restart requests remain on disk while Guardian reads bounded rollout headers/tails. It scans every rollout changed since the current Codex process launched, with at least a 12-hour lookback. Any non-terminal task blocks restart. More than 200 candidates, malformed state, or scanner failure also blocks restart. The native heartbeat must call `recovery_tick` once before Guardian permits the restart. This proves Codex registered it. Guardian verifies it again immediately before stopping Codex. Once every observed task is terminal and no rollout changes for 15 seconds, Guardian claims the exact queue snapshot, checks activity again, restarts Codex once, and opens `codex://threads/<TASK_ID>`. After relaunch, one heartbeat run receives the on-device recovery prompt; overlapping runs wait. The claim remains until the recovered task deletes or pauses the heartbeat and calls `ack_recovery`. Guardian never launches detached `codex exec resume` workers. If the origin or heartbeat cannot be proven, Codex is not restarted.
 
 The menu-bar **Force Restart Codex Now** action bypasses this gate only after a person explicitly clicks it.
 
