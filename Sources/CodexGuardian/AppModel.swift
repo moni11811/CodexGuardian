@@ -357,19 +357,12 @@ final class AppModel: ObservableObject {
     }
 
     private func codexAppServerProcessIDs(applicationPaths: [String]) -> Set<Int32> {
-        let process = Process()
-        let output = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/bin/ps")
-        process.arguments = ["-axo", "pid=,command="]
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
         do {
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return [] }
-            let data = output.fileHandleForReading.readDataToEndOfFile()
-            guard data.count <= 2_000_000,
-                  let processList = String(data: data, encoding: .utf8) else { return [] }
+            let data = try ProcessOutputCapture(maximumBytes: 2_000_000).run(
+                executableURL: URL(fileURLWithPath: "/bin/ps"),
+                arguments: ["-axo", "pid=,command="]
+            )
+            guard let processList = String(data: data, encoding: .utf8) else { return [] }
             return CodexAppServerProcessPolicy().processIDsToStop(
                 processList: processList,
                 applicationPaths: applicationPaths
