@@ -6,3 +6,5 @@
 *.pem
 *.p12
 *.key
+__pycache__/
+*.pyc

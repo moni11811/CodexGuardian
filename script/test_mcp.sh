@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MCP_BINARY="$ROOT_DIR/dist/bin/codex-guardian-mcp"
+MCP_BINARY="${CODEX_GUARDIAN_MCP_BINARY:-$ROOT_DIR/dist/bin/codex-guardian-mcp}"
 
 if [[ ! -x "$MCP_BINARY" ]]; then
   echo "MCP binary missing; run ./script/build_and_run.sh first" >&2
@@ -16,6 +16,8 @@ OUTPUT="$({
 } | "$MCP_BINARY")"
 
 grep -q '"name":"codex-guardian"' <<<"$OUTPUT"
+grep -q '"name":"guardian_status"' <<<"$OUTPUT"
+grep -q '"name":"recover_agent"' <<<"$OUTPUT"
 grep -q '"name":"prepare_recovery"' <<<"$OUTPUT"
 grep -q '"name":"prepare_restart"' <<<"$OUTPUT"
 grep -q '"outputSchema"' <<<"$OUTPUT"
@@ -29,6 +31,7 @@ grep -q 'sanitized recent task state' <<<"$OUTPUT"
 grep -q 'codex_app__send_message_to_thread' <<<"$OUTPUT"
 grep -q 'heartbeat continues the exact task after relaunch' <<<"$OUTPUT"
 grep -q 'every unrelated observed task is idle' <<<"$OUTPUT"
+grep -q 'Native recovery has no heartbeat automation to delete' <<<"$OUTPUT"
 if grep -q 'delete or pause' <<<"$OUTPUT"; then
   echo "MCP permits stale paused recovery heartbeats" >&2
   exit 1
@@ -43,17 +46,54 @@ if grep -q '"required":\["origin_token","recovery_prompt"\]' <<<"$OUTPUT"; then
 fi
 
 FIXTURE_ROOT="$(mktemp -d)"
-trap 'rm -rf "$FIXTURE_ROOT"' EXIT
+DAEMON_PID=""
+cleanup() {
+  if [[ -n "$DAEMON_PID" ]]; then
+    kill "$DAEMON_PID" >/dev/null 2>&1 || true
+  fi
+  rm -rf "$FIXTURE_ROOT"
+}
+trap cleanup EXIT
 SESSIONS_ROOT="$FIXTURE_ROOT/sessions"
 STATE_ROOT="$FIXTURE_ROOT/state"
 AUTOMATIONS_ROOT="$FIXTURE_ROOT/automations"
 ORIGIN_TOKEN="31A25291-BDB6-44EF-AAB8-A95450F99A91"
 THREAD_ID="019f0000-0000-7000-8000-000000000099"
+NATIVE_ORIGIN_TOKEN="D0EB594A-25C6-43B5-A1C7-7AB151DF1A21"
+NATIVE_THREAD_ID="019f0000-0000-7000-8000-000000000100"
 mkdir -p "$SESSIONS_ROOT/2026/07/25"
 printf '%s\n' \
   "{\"type\":\"session_meta\",\"payload\":{\"id\":\"$THREAD_ID\"}}" \
   "{\"type\":\"event_msg\",\"payload\":{\"message\":\"prepare recovery $ORIGIN_TOKEN\"}}" \
   > "$SESSIONS_ROOT/2026/07/25/recovery.jsonl"
+printf '%s\n' \
+  "{\"type\":\"session_meta\",\"payload\":{\"id\":\"$NATIVE_THREAD_ID\"}}" \
+  "{\"type\":\"event_msg\",\"payload\":{\"message\":\"recover agent $NATIVE_ORIGIN_TOKEN\"}}" \
+  > "$SESSIONS_ROOT/2026/07/25/native-recovery.jsonl"
+
+DAEMON_BINARY="${CODEX_GUARDIAN_DAEMON_BINARY:-$ROOT_DIR/dist/CodexGuardian.app/Contents/SharedSupport/guardian-daemon}"
+test -x "$DAEMON_BINARY"
+mkdir -p "$STATE_ROOT/credentials"
+chmod 700 "$STATE_ROOT" "$STATE_ROOT/credentials"
+/usr/bin/openssl rand -out "$STATE_ROOT/credentials/mcp.token" 32
+chmod 600 "$STATE_ROOT/credentials/mcp.token"
+"$DAEMON_BINARY" --state-dir "$STATE_ROOT" --socket "$STATE_ROOT/guardian.sock" --once &
+DAEMON_PID="$!"
+for _ in {1..100}; do
+  [[ -S "$STATE_ROOT/guardian.sock" ]] && break
+  sleep 0.02
+done
+test -S "$STATE_ROOT/guardian.sock"
+
+STATUS_OUTPUT="$({
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke-test","version":"1"}}}'
+  printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"guardian_status","arguments":{}}}'
+} | CODEX_GUARDIAN_DAEMON_STATE_DIR="$STATE_ROOT" \
+    CODEX_GUARDIAN_EXPECTED_DAEMON_PATH="$DAEMON_BINARY" "$MCP_BINARY")"
+wait "$DAEMON_PID"
+DAEMON_PID=""
+grep -q '\"state\":\"connected\"' <<<"$STATUS_OUTPUT"
+grep -q '\"authority\":\"shadow_only\"' <<<"$STATUS_OUTPUT"
 
 PREPARE_OUTPUT="$({
   printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke-test","version":"1"}}}'
@@ -66,6 +106,20 @@ grep -q '\\\"recovery_prompt\\\":\\\"Use the fallback route.\\\"' <<<"$PREPARE_O
 grep -q '\\\"restarts_desktop\\\":false' <<<"$PREPARE_OUTPUT"
 if find "$STATE_ROOT" -type f -name '*.json' -print -quit 2>/dev/null | grep -q .; then
   echo "prepare_recovery incorrectly queued a hard restart" >&2
+  exit 1
+fi
+
+NATIVE_OUTPUT="$({
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke-test","version":"1"}}}'
+  printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"recover_agent\",\"arguments\":{\"origin_token\":\"$NATIVE_ORIGIN_TOKEN\",\"recovery_prompt\":\"Continue native recovery.\"}}}"
+} | CODEX_GUARDIAN_SESSIONS_DIR="$SESSIONS_ROOT" CODEX_GUARDIAN_STATE_DIR="$STATE_ROOT" "$MCP_BINARY")"
+
+grep -q '\"state\":\"queued_native\"' <<<"$NATIVE_OUTPUT"
+grep -q "\\\"thread_id\\\":\\\"$NATIVE_THREAD_ID\\\"" <<<"$NATIVE_OUTPUT"
+NATIVE_REQUEST_FILE="$(/usr/bin/grep -l "$NATIVE_ORIGIN_TOKEN" "$STATE_ROOT"/pending/*.json)"
+/usr/bin/grep -q '"requestMode":"nativeFirst"' "$NATIVE_REQUEST_FILE"
+if /usr/bin/grep -q 'continuationAutomationID' "$NATIVE_REQUEST_FILE"; then
+  echo "native recovery incorrectly requires a heartbeat automation" >&2
   exit 1
 fi
 

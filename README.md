@@ -1,47 +1,81 @@
 # Codex Guardian
 
-Codex Guardian is a small shield for Codex on your Mac.
+Codex Guardian is a shield for Codex on your Mac.
 
-Sometimes an AI task gets stuck. Guardian helps it find the same task and try again without losing its place.
+When an AI task gets stuck, Guardian tries to continue the **same task** without losing its place or disturbing other work.
 
-## What it does
+## What works today
 
-When Codex can still respond, Guardian finds the exact task. Codex then uses its own built-in desktop command to send a “continue” message to that task. This is the normal recovery path. It does not restart the app.
+- A shield app runs from the Mac menu bar.
+- A private local daemon remembers recovery state, even if the menu app closes.
+- Codex can call Guardian through MCP.
+- Guardian can identify the exact task that requested help.
+- The normal recovery path sends a continuation to that exact Codex task without restarting Codex.
+- Repeated requests use a unique ID so Guardian does not send the same continuation twice.
+- Unknown, incomplete, or conflicting safety evidence stops destructive automation.
+- Recovery history and task state appear in the Guardian window.
 
-If Codex itself must restart, Guardian first gives the exact task a small automatic “are we back?” reminder. Guardian refuses to restart unless that reminder is safely ready. It ignores only that reminder while waiting; real work in the same task still counts as busy. It waits for every other task and for 15 quiet seconds. After Codex and its helper finish reopening, the reminder continues the correct task automatically, then removes itself. No copy, paste, or Send step.
+## What is intentionally limited
 
-If Guardian cannot tell whether a task is finished, it waits. The shield menu has a clearly named force-restart button for emergencies.
+Unattended hard restart is **not enabled in the current production UI**. Codex Desktop does not expose the complete, authoritative live-task inventory Guardian needs to prove that every other task is safe. Guardian therefore fails closed instead of guessing.
 
-Guardian can queue several restart requests. One stuck task does not replace another.
+The **Force Restart…** button is a local emergency control. It still requires a previously armed exact-task continuation and a second human confirmation. It is not a general “kill Codex” button.
+
+The iPhone project is an experimental client. Pairing and observation foundations exist, but production prompt and restart commands are not connected yet.
+
+See [Current capabilities](docs/RECOVERY_WORKFLOWS.md#current-capabilities) for the exact support table.
 
 ## Install
 
-Download this project, open Terminal in its folder, and run:
+You need macOS 14 or newer, Xcode command-line tools, Swift 6, and ImageMagick at `/usr/local/bin/magick`.
+
+From this project folder:
 
 ```bash
 ./script/install_production.sh
+./script/test_production_install.sh
 ```
 
-Then restart Codex once. A shield appears in your Mac menu bar when Guardian is running.
+The installer builds a release app, installs it at `/Applications/Codex Guardian.app`, starts the menu app and daemon, creates private local credentials, and rolls back to the previous app if activation fails.
 
-If you are a developer or need help connecting Guardian, see [Technical Setup](TECHNICAL_SETUP.md).
+Add the MCP helper to `~/.codex/config.toml`:
 
-The included [Codex instructions](AGENTS.md) teach Codex to use same-task recovery first. Guardian never launches a second hidden Codex worker.
+```toml
+[mcp_servers.codex_guardian]
+command = "/Applications/Codex Guardian.app/Contents/SharedSupport/codex-guardian-mcp"
+```
 
-## Is it safe?
+Restart Codex once so it loads the new MCP server. You should then see Guardian tools such as `guardian_status` and `prepare_recovery`.
 
-Guardian acts only when it can prove which task asked for help. If it cannot prove that, it stops.
+## Recover a task
 
-On supported Macs, restart recovery messages are created locally with Apple Intelligence. Guardian removes common secret patterns first and never sends this summary to an online AI service. If the local model is unavailable, Guardian uses a simple safe message instead.
+Ask Codex to use Guardian’s native recovery. Codex should:
 
-The project contains no API keys or accounts. Keep your own secrets out of bug reports and contributions.
+1. Generate a fresh UUID in the current task.
+2. Call `prepare_recovery` with that UUID.
+3. Send Guardian’s returned prompt to Guardian’s returned task ID using Codex’s native same-task message tool.
+4. End the old turn. The queued continuation arrives in the same task automatically.
 
-## Can I sell it?
+No copy, paste, Accessibility permission, fake mouse click, or detached `codex exec resume` worker is used.
 
-No. You may read, use, change, and share this project for noncommercial purposes. Selling it, bundling it into a paid product, or using it for paid services requires separate written permission. See [LICENSE](LICENSE).
+## Learn more
 
-This is public source under the PolyForm Noncommercial License 1.0.0. It is source-available, not OSI-approved open source.
+- [User guide](docs/USER_GUIDE.md)
+- [Recovery workflows and current limits](docs/RECOVERY_WORKFLOWS.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Technical setup](TECHNICAL_SETUP.md)
+- [Security and privacy](SECURITY.md)
+- [Development and testing](docs/DEVELOPMENT.md)
+- [Documentation map](docs/README.md)
 
-## Status
+## License
 
-This is version 1. Expect rough edges. Please open a GitHub issue for bugs, but never include passwords, tokens, private prompts, or personal files.
+Codex Guardian uses the [PolyForm Noncommercial License 1.0.0](LICENSE).
+
+You may read, use, change, and share it for permitted noncommercial purposes. Commercial use requires separate permission. This is public source, but it is **not OSI-approved open source** because commercial use is restricted.
+
+## Project status
+
+This is an early public project. The installed Mac app, local daemon, MCP, native exact-task continuation, durable journal, and fail-closed safety policies are implemented and tested. Automatic hard restart and production phone control remain gated by missing authoritative Codex Desktop capabilities.
+
+Never put passwords, API keys, access tokens, private prompts, personal paths, or recovery logs in a public issue.

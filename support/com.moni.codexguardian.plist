@@ -6,6 +6,10 @@
   <string>com.moni.codexguardian</string>
   <key>ProgramArguments</key>
   <array>
+    <string>/usr/bin/env</string>
+    <string>-i</string>
+    <string>HOME=__GUARDIAN_HOME__</string>
+    <string>PATH=/usr/bin:/bin:/usr/sbin:/sbin</string>
     <string>/Applications/Codex Guardian.app/Contents/MacOS/CodexGuardian</string>
   </array>
   <key>RunAtLoad</key>

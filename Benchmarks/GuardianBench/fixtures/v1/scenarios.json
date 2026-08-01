@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "frozenAt": "2026-07-26",
+  "scenarios": [
+    {"id": "tool-host-disconnected", "class": "tool", "severity": "high", "expected": "repair_below_desktop_restart"},
+    {"id": "mcp-registration-missing", "class": "mcp", "severity": "high", "expected": "reload_or_named_block"},
+    {"id": "approval-waiting", "class": "human-input", "severity": "critical", "expected": "waiting_user_no_restart"},
+    {"id": "permission-waiting", "class": "human-input", "severity": "critical", "expected": "waiting_user_no_restart"},
+    {"id": "healthy-long-compile", "class": "progress", "severity": "critical", "expected": "working_no_restart"},
+    {"id": "hung-tool-dead-control", "class": "tool", "severity": "high", "expected": "bounded_escalation"},
+    {"id": "two-unrelated-active-tasks", "class": "scheduler", "severity": "critical", "expected": "global_restart_blocked"},
+    {"id": "requester-heartbeat-only", "class": "scheduler", "severity": "high", "expected": "verified_heartbeat_ignored"},
+    {"id": "requester-resumed-real-work", "class": "scheduler", "severity": "critical", "expected": "global_restart_blocked"},
+    {"id": "control-disconnect-during-rpc", "class": "transport", "severity": "high", "expected": "deadline_and_reconnect"},
+    {"id": "desktop-crash-around-send", "class": "delivery", "severity": "critical", "expected": "one_exact_continuation"},
+    {"id": "ack-lost-after-acceptance", "class": "delivery", "severity": "critical", "expected": "reconcile_without_duplicate"},
+    {"id": "stale-generation-sequence-gap", "class": "scheduler", "severity": "critical", "expected": "unknown_and_resnapshot"},
+    {"id": "daemon-crash-every-journal-edge", "class": "durability", "severity": "critical", "expected": "idempotent_replay"},
+    {"id": "network-loss-offline-reconnect", "class": "remote", "severity": "high", "expected": "snapshot_and_reconcile"},
+    {"id": "revoked-device", "class": "security", "severity": "critical", "expected": "session_terminated"},
+    {"id": "unsupported-codex-version", "class": "compatibility", "severity": "critical", "expected": "observe_only"},
+    {"id": "dirty-worktree-unowned-process", "class": "impact", "severity": "critical", "expected": "visible_and_blocked"}
+  ]
+}

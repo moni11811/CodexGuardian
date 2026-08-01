@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codexguardian.example/schemas/guardianbench-result-v1.json",
+  "title": "GuardianBench result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "benchmarkRevision", "implementation", "revision", "environment", "seed", "mode", "confidence", "results"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "benchmarkRevision": { "type": "string", "minLength": 1 },
+    "implementation": { "type": "string", "minLength": 1 },
+    "revision": { "type": "string", "minLength": 1 },
+    "environment": { "type": "string", "minLength": 1 },
+    "seed": { "type": "integer", "minimum": 0 },
+    "mode": { "const": "deterministic_guardian_policy" },
+    "confidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "confidenceLevel", "warning"],
+      "properties": {
+        "method": { "const": "wilson_score_95_percent" },
+        "confidenceLevel": { "const": 0.95 },
+        "warning": { "type": "string", "minLength": 1 }
+      }
+    },
+    "results": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["scenarioId", "status", "evidence"],
+        "properties": {
+          "scenarioId": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["completed", "not_available"] },
+          "trialCount": { "type": "integer", "minimum": 1 },
+          "correctOutcomes": { "type": "integer", "minimum": 0 },
+          "unsafeRestarts": { "type": "integer", "minimum": 0 },
+          "wrongThreadContinuations": { "type": "integer", "minimum": 0 },
+          "duplicateAcceptedCommands": { "type": "integer", "minimum": 0 },
+          "lostAcceptedCommands": { "type": "integer", "minimum": 0 },
+          "operatorActions": { "type": "integer", "minimum": 0 },
+          "classificationMilliseconds": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+          "repairMilliseconds": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+          "safePointWaitMilliseconds": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+          "finalJournalPhase": { "type": "string" },
+          "evidence": { "type": "array", "items": { "type": "string" } },
+          "confidenceBounds": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["lower", "upper"],
+            "properties": {
+              "lower": { "type": "number", "minimum": 0, "maximum": 1 },
+              "upper": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "status": { "const": "completed" } } },
+            "then": { "required": ["trialCount", "correctOutcomes", "unsafeRestarts", "wrongThreadContinuations", "duplicateAcceptedCommands", "lostAcceptedCommands", "operatorActions", "confidenceBounds"] }
+          },
+          {
+            "if": { "properties": { "status": { "const": "not_available" } } },
+            "then": { "not": { "anyOf": [
+              { "required": ["trialCount"] }, { "required": ["correctOutcomes"] }, { "required": ["confidenceBounds"] }
+            ] } }
+          }
+        ]
+      }
+    }
+  }
+}

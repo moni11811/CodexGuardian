@@ -6,6 +6,14 @@ public enum RestartRecoveryPhase: String, Codable, Equatable, Sendable {
     case claimed
     case awaitingContinuation
     case deliveringContinuation
+    case nativeExecuting
+    case nativeAwaitingAcknowledgement
+    case nativeFailed
+}
+
+public enum RecoveryRequestMode: String, Codable, Equatable, Sendable {
+    case hardRestartHeartbeat
+    case nativeFirst
 }
 
 public enum RestartRequestStoreError: Error, Equatable, Sendable {
@@ -53,12 +61,15 @@ public struct RestartRequest: Codable, Equatable, Sendable {
     public let delaySeconds: Int
     public let targetBundleIdentifier: String
     public let originToken: String?
+    public let requestMode: RecoveryRequestMode
     public let continuationAutomationID: String?
     public let recoveryPhase: RestartRecoveryPhase
     public let heartbeatObservedAt: Date?
     public let restartProcessIdentifier: Int32?
     public let restartedAt: Date?
     public let deliveryLeaseStartedAt: Date?
+    public let nativeOperationID: UUID?
+    public let recoveryGeneration: UInt64?
 
     public init(
         id: UUID = UUID(),
@@ -69,12 +80,15 @@ public struct RestartRequest: Codable, Equatable, Sendable {
         delaySeconds: Int = 2,
         targetBundleIdentifier: String = "com.openai.codex",
         originToken: String? = nil,
+        requestMode: RecoveryRequestMode = .hardRestartHeartbeat,
         continuationAutomationID: String? = nil,
         recoveryPhase: RestartRecoveryPhase = .queued,
         heartbeatObservedAt: Date? = nil,
         restartProcessIdentifier: Int32? = nil,
         restartedAt: Date? = nil,
-        deliveryLeaseStartedAt: Date? = nil
+        deliveryLeaseStartedAt: Date? = nil,
+        nativeOperationID: UUID? = nil,
+        recoveryGeneration: UInt64? = nil
     ) {
         self.id = id
         self.requestedAt = requestedAt
@@ -84,18 +98,26 @@ public struct RestartRequest: Codable, Equatable, Sendable {
         self.delaySeconds = min(max(delaySeconds, 1), 30)
         self.targetBundleIdentifier = targetBundleIdentifier
         self.originToken = originToken
+        self.requestMode = requestMode
         self.continuationAutomationID = continuationAutomationID
         self.recoveryPhase = recoveryPhase
         self.heartbeatObservedAt = heartbeatObservedAt
         self.restartProcessIdentifier = restartProcessIdentifier
         self.restartedAt = restartedAt
         self.deliveryLeaseStartedAt = deliveryLeaseStartedAt
+        self.nativeOperationID = nativeOperationID
+        self.recoveryGeneration = recoveryGeneration
     }
 
     public var automaticContinuationIsArmed: Bool {
-        !threadID.isEmpty
-            && originToken.flatMap(UUID.init(uuidString:)) != nil
-            && continuationAutomationID?.isEmpty == false
+        guard !threadID.isEmpty,
+              originToken.flatMap(UUID.init(uuidString:)) != nil else { return false }
+        switch requestMode {
+        case .nativeFirst:
+            return true
+        case .hardRestartHeartbeat:
+            return continuationAutomationID?.isEmpty == false
+        }
     }
 
     public func withRecoveryPrompt(_ prompt: String) -> RestartRequest {
@@ -108,12 +130,15 @@ public struct RestartRequest: Codable, Equatable, Sendable {
             delaySeconds: delaySeconds,
             targetBundleIdentifier: targetBundleIdentifier,
             originToken: originToken,
+            requestMode: requestMode,
             continuationAutomationID: continuationAutomationID,
             recoveryPhase: recoveryPhase,
             heartbeatObservedAt: heartbeatObservedAt,
             restartProcessIdentifier: restartProcessIdentifier,
             restartedAt: restartedAt,
-            deliveryLeaseStartedAt: deliveryLeaseStartedAt
+            deliveryLeaseStartedAt: deliveryLeaseStartedAt,
+            nativeOperationID: nativeOperationID,
+            recoveryGeneration: recoveryGeneration
         )
     }
 
@@ -127,12 +152,15 @@ public struct RestartRequest: Codable, Equatable, Sendable {
             delaySeconds: delaySeconds,
             targetBundleIdentifier: targetBundleIdentifier,
             originToken: originToken,
+            requestMode: requestMode,
             continuationAutomationID: continuationAutomationID,
             recoveryPhase: phase,
             heartbeatObservedAt: heartbeatObservedAt,
             restartProcessIdentifier: restartProcessIdentifier,
             restartedAt: restartedAt,
-            deliveryLeaseStartedAt: deliveryLeaseStartedAt
+            deliveryLeaseStartedAt: deliveryLeaseStartedAt,
+            nativeOperationID: nativeOperationID,
+            recoveryGeneration: recoveryGeneration
         )
     }
 
@@ -159,12 +187,25 @@ public struct RestartRequest: Codable, Equatable, Sendable {
         )
     }
 
+    public func nativeExecuting(
+        operationID: UUID,
+        generation: UInt64
+    ) -> RestartRequest {
+        copy(
+            recoveryPhase: .nativeExecuting,
+            nativeOperationID: operationID,
+            recoveryGeneration: generation
+        )
+    }
+
     private func copy(
         recoveryPhase: RestartRecoveryPhase? = nil,
         heartbeatObservedAt: Date?? = nil,
         restartProcessIdentifier: Int32?? = nil,
         restartedAt: Date?? = nil,
-        deliveryLeaseStartedAt: Date?? = nil
+        deliveryLeaseStartedAt: Date?? = nil,
+        nativeOperationID: UUID?? = nil,
+        recoveryGeneration: UInt64?? = nil
     ) -> RestartRequest {
         RestartRequest(
             id: id,
@@ -175,20 +216,24 @@ public struct RestartRequest: Codable, Equatable, Sendable {
             delaySeconds: delaySeconds,
             targetBundleIdentifier: targetBundleIdentifier,
             originToken: originToken,
+            requestMode: requestMode,
             continuationAutomationID: continuationAutomationID,
             recoveryPhase: recoveryPhase ?? self.recoveryPhase,
             heartbeatObservedAt: heartbeatObservedAt ?? self.heartbeatObservedAt,
             restartProcessIdentifier: restartProcessIdentifier ?? self.restartProcessIdentifier,
             restartedAt: restartedAt ?? self.restartedAt,
-            deliveryLeaseStartedAt: deliveryLeaseStartedAt ?? self.deliveryLeaseStartedAt
+            deliveryLeaseStartedAt: deliveryLeaseStartedAt ?? self.deliveryLeaseStartedAt,
+            nativeOperationID: nativeOperationID ?? self.nativeOperationID,
+            recoveryGeneration: recoveryGeneration ?? self.recoveryGeneration
         )
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, requestedAt, threadID, recoveryPrompt, contextSnapshot
-        case delaySeconds, targetBundleIdentifier, originToken
+        case delaySeconds, targetBundleIdentifier, originToken, requestMode
         case continuationAutomationID, recoveryPhase
         case heartbeatObservedAt, restartProcessIdentifier, restartedAt, deliveryLeaseStartedAt
+        case nativeOperationID, recoveryGeneration
     }
 
     public init(from decoder: Decoder) throws {
@@ -206,6 +251,10 @@ public struct RestartRequest: Codable, Equatable, Sendable {
                 forKey: .targetBundleIdentifier
             ) ?? "com.openai.codex",
             originToken: try values.decodeIfPresent(String.self, forKey: .originToken),
+            requestMode: try values.decodeIfPresent(
+                RecoveryRequestMode.self,
+                forKey: .requestMode
+            ) ?? .hardRestartHeartbeat,
             continuationAutomationID: try values.decodeIfPresent(
                 String.self,
                 forKey: .continuationAutomationID
@@ -223,6 +272,14 @@ public struct RestartRequest: Codable, Equatable, Sendable {
             deliveryLeaseStartedAt: try values.decodeIfPresent(
                 Date.self,
                 forKey: .deliveryLeaseStartedAt
+            ),
+            nativeOperationID: try values.decodeIfPresent(
+                UUID.self,
+                forKey: .nativeOperationID
+            ),
+            recoveryGeneration: try values.decodeIfPresent(
+                UInt64.self,
+                forKey: .recoveryGeneration
             )
         )
     }
@@ -237,12 +294,15 @@ public struct RestartRequest: Codable, Equatable, Sendable {
         try values.encode(delaySeconds, forKey: .delaySeconds)
         try values.encode(targetBundleIdentifier, forKey: .targetBundleIdentifier)
         try values.encodeIfPresent(originToken, forKey: .originToken)
+        try values.encode(requestMode, forKey: .requestMode)
         try values.encodeIfPresent(continuationAutomationID, forKey: .continuationAutomationID)
         try values.encode(recoveryPhase, forKey: .recoveryPhase)
         try values.encodeIfPresent(heartbeatObservedAt, forKey: .heartbeatObservedAt)
         try values.encodeIfPresent(restartProcessIdentifier, forKey: .restartProcessIdentifier)
         try values.encodeIfPresent(restartedAt, forKey: .restartedAt)
         try values.encodeIfPresent(deliveryLeaseStartedAt, forKey: .deliveryLeaseStartedAt)
+        try values.encodeIfPresent(nativeOperationID, forKey: .nativeOperationID)
+        try values.encodeIfPresent(recoveryGeneration, forKey: .recoveryGeneration)
     }
 }
 
@@ -282,6 +342,9 @@ public struct RestartRequestStore: Sendable {
                 }
                 if let existing = matches.first?.request {
                     guard existing.threadID == request.threadID,
+                          existing.requestMode == request.requestMode,
+                          existing.requestMode != .nativeFirst
+                            || existing.recoveryPrompt == request.recoveryPrompt,
                           existing.continuationAutomationID == request.continuationAutomationID else {
                         throw RestartRequestStoreError.duplicateOriginToken
                     }
@@ -398,6 +461,74 @@ public struct RestartRequestStore: Sendable {
         }
     }
 
+    public func markClaimNativeExecuting(
+        id: UUID,
+        operationID: UUID,
+        generation: UInt64
+    ) throws {
+        try withExclusiveLock {
+            guard generation > 0,
+                  let item = try claimedItems().first(where: { $0.request.id == id }) else {
+                throw CocoaError(.fileNoSuchFile)
+            }
+            guard item.request.requestMode == .nativeFirst else {
+                throw RestartRequestStoreError.stateBusy
+            }
+            if [.nativeExecuting, .nativeAwaitingAcknowledgement].contains(
+                item.request.recoveryPhase
+            ), item.request.nativeOperationID == operationID,
+               item.request.recoveryGeneration == generation {
+                return
+            }
+            guard item.request.recoveryPhase == .claimed else {
+                throw RestartRequestStoreError.stateBusy
+            }
+            let executing = item.request.nativeExecuting(
+                operationID: operationID,
+                generation: generation
+            )
+            try JSONEncoder().encode(executing).write(to: item.url, options: .atomic)
+        }
+    }
+
+    public func markNativeAwaitingAcknowledgement(id: UUID) throws {
+        try withExclusiveLock {
+            guard let item = try claimedItems().first(where: { $0.request.id == id }) else {
+                throw CocoaError(.fileNoSuchFile)
+            }
+            guard item.request.requestMode == .nativeFirst,
+                  item.request.nativeOperationID != nil,
+                  item.request.recoveryGeneration != nil else {
+                throw RestartRequestStoreError.stateBusy
+            }
+            if item.request.recoveryPhase == .nativeAwaitingAcknowledgement {
+                return
+            }
+            guard item.request.recoveryPhase == .nativeExecuting else {
+                throw RestartRequestStoreError.stateBusy
+            }
+            let awaiting = item.request.withRecoveryPhase(
+                .nativeAwaitingAcknowledgement
+            )
+            try JSONEncoder().encode(awaiting).write(to: item.url, options: .atomic)
+        }
+    }
+
+    public func markNativeFailed(id: UUID) throws {
+        try withExclusiveLock {
+            guard let item = try claimedItems().first(where: { $0.request.id == id }) else {
+                throw CocoaError(.fileNoSuchFile)
+            }
+            guard item.request.requestMode == .nativeFirst,
+                  [.claimed, .nativeExecuting].contains(item.request.recoveryPhase) else {
+                throw RestartRequestStoreError.stateBusy
+            }
+            try JSONEncoder().encode(
+                item.request.withRecoveryPhase(.nativeFailed)
+            ).write(to: item.url, options: .atomic)
+        }
+    }
+
     public func updateClaimedRequests(_ requests: [RestartRequest]) throws {
         try withExclusiveLock {
             let updates = Dictionary(uniqueKeysWithValues: requests.map { ($0.id, $0) })
@@ -410,6 +541,9 @@ public struct RestartRequestStore: Sendable {
                 guard let update = updates[item.request.id],
                       update.threadID == item.request.threadID,
                       update.originToken == item.request.originToken,
+                      update.requestMode == item.request.requestMode,
+                      update.nativeOperationID == item.request.nativeOperationID,
+                      update.recoveryGeneration == item.request.recoveryGeneration,
                       update.continuationAutomationID == item.request.continuationAutomationID else {
                     throw CocoaError(.fileWriteUnknown)
                 }
@@ -454,7 +588,8 @@ public struct RestartRequestStore: Sendable {
             case .deliveringContinuation:
                 guard let startedAt = item.request.deliveryLeaseStartedAt,
                       now.timeIntervalSince(startedAt) >= leaseDuration else { return .waiting }
-            case .queued, .claimed:
+            case .queued, .claimed, .nativeExecuting,
+                    .nativeAwaitingAcknowledgement, .nativeFailed:
                 return .waiting
             }
             let leased = item.request.withDeliveryLease(startedAt: now)
@@ -475,12 +610,30 @@ public struct RestartRequestStore: Sendable {
         }
     }
 
+    @discardableResult
+    public func acknowledgeNativeRecovery(originToken: String) throws -> UUID? {
+        try withExclusiveLock {
+            guard let item = try claimedItems().first(where: {
+                $0.request.originToken == originToken
+                    && $0.request.requestMode == .nativeFirst
+                    && $0.request.recoveryPhase == .nativeAwaitingAcknowledgement
+            }) else { return nil }
+            try FileManager.default.removeItem(at: item.url)
+            return item.request.id
+        }
+    }
+
     public func recoverClaims() throws {
         try withExclusiveLock {
             guard FileManager.default.fileExists(atPath: claimedDirectory.path) else { return }
             try FileManager.default.createDirectory(at: queueDirectory, withIntermediateDirectories: true)
             for item in try claimedItems() {
-                guard ![.awaitingContinuation, .deliveringContinuation]
+                guard ![
+                    .awaitingContinuation,
+                    .deliveringContinuation,
+                    .nativeAwaitingAcknowledgement,
+                    .nativeFailed,
+                ]
                     .contains(item.request.recoveryPhase) else { continue }
                 var destination = queueDirectory.appending(path: item.url.lastPathComponent)
                 if FileManager.default.fileExists(atPath: destination.path) {
