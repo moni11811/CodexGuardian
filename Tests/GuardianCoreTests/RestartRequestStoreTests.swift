@@ -257,6 +257,40 @@ import Testing
     #expect(try store.blockedRequests() == [legacy])
 }
 
+@Test func nativeFirstIntentIsArmedWithoutHeartbeatAndWaitsForExactAck() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    let store = RestartRequestStore(directory: directory)
+    let token = "D0EB594A-25C6-43B5-A1C7-7AB151DF1A21"
+    let operationID = UUID()
+    let request = RestartRequest(
+        threadID: "thread-native",
+        recoveryPrompt: "Continue with the fallback.",
+        originToken: token,
+        requestMode: .nativeFirst
+    )
+    try store.enqueue(request)
+
+    #expect(try store.quarantineUnarmedPendingRequests().isEmpty)
+    try store.claimPending(ids: [request.id])
+    try store.markClaimNativeExecuting(
+        id: request.id,
+        operationID: operationID,
+        generation: 1
+    )
+    #expect(try store.request(originToken: token)?.recoveryPhase == .nativeExecuting)
+    #expect(try store.request(originToken: token)?.nativeOperationID == operationID)
+    #expect(try store.request(originToken: token)?.recoveryGeneration == 1)
+
+    try store.markNativeAwaitingAcknowledgement(id: request.id)
+    try store.recoverClaims()
+    #expect(try store.peekAllPending().isEmpty)
+    #expect(try store.request(originToken: token)?.recoveryPhase
+        == .nativeAwaitingAcknowledgement)
+    #expect(try store.acknowledgeNativeRecovery(originToken: token) == request.id)
+    #expect(try store.request(originToken: token) == nil)
+}
+
 @Test func corruptPendingRequestIsPreservedWithoutBlockingValidRecovery() throws {
     let directory = FileManager.default.temporaryDirectory
         .appending(path: UUID().uuidString, directoryHint: .isDirectory)

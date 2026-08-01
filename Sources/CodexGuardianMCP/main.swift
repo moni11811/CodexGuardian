@@ -1,9 +1,25 @@
 import Foundation
+import GuardianClient
 import GuardianCore
 
 private let store = RestartRequestStore()
 private let originResolver = ThreadOriginResolver()
 private let automationVerifier = CodexRecoveryAutomationVerifier()
+
+private enum GuardianDaemonStatusError: Error { case unavailable }
+
+private final class GuardianDaemonReplyBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var reply: Result<GuardianDaemonReply, Error>?
+
+    func store(_ result: Result<GuardianDaemonReply, Error>) {
+        lock.withLock { reply = result }
+    }
+
+    func load() -> Result<GuardianDaemonReply, Error>? {
+        lock.withLock { reply }
+    }
+}
 
 private func write(_ object: [String: Any]) {
     guard JSONSerialization.isValidJSONObject(object),
@@ -25,6 +41,68 @@ private func launchGuardianIfNeeded() {
     process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
     process.arguments = ["-g", "-b", "com.moni.codexguardian"]
     try? process.run()
+}
+
+private func daemonStatusPayload() throws -> [String: Any] {
+    let stateDirectory: URL
+    if let override = ProcessInfo.processInfo.environment["CODEX_GUARDIAN_DAEMON_STATE_DIR"] {
+        stateDirectory = URL(fileURLWithPath: override, isDirectory: true)
+    } else {
+        stateDirectory = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        )[0].appending(path: "CodexGuardian", directoryHint: .isDirectory)
+    }
+    let credential = try GuardianCredentialFile.load(
+        at: stateDirectory.appending(path: "credentials/mcp.token")
+    )
+    let client = GuardianClient(
+        clientID: GuardianLocalClientDefaults.mcpID,
+        credential: credential,
+        transport: GuardianUnixSocketTransport(
+            socketPath: stateDirectory.appending(path: "guardian.sock").path,
+            expectedPeerExecutablePath: try GuardianLocalDaemonEndpoint.expectedExecutablePath()
+        )
+    )
+    let deadline = Date().addingTimeInterval(5)
+    let command = GuardianIPCCommand(
+        protocolVersion: .current,
+        rpcID: UUID(),
+        operationID: UUID(),
+        clientID: GuardianLocalClientDefaults.mcpID,
+        expectedGeneration: 0,
+        deadline: deadline,
+        originThreadID: "codex-guardian-mcp",
+        targetThreadID: "codex-guardian-mcp",
+        action: .observe,
+        force: false
+    )
+    let semaphore = DispatchSemaphore(value: 0)
+    let box = GuardianDaemonReplyBox()
+    Task {
+        do {
+            box.store(.success(try await client.send(command)))
+        } catch {
+            box.store(.failure(error))
+        }
+        semaphore.signal()
+    }
+    guard semaphore.wait(timeout: .now() + 6) == .success,
+          let result = box.load() else {
+        throw GuardianDaemonStatusError.unavailable
+    }
+    switch try result.get() {
+    case let .snapshot(snapshot):
+        return [
+            "state": "connected",
+            "authority": "shadow_only",
+            "generation": snapshot.generation,
+            "last_sequence": snapshot.lastSequence,
+            "operation_count": snapshot.operations.count,
+        ]
+    case .accepted, .rejected:
+        throw GuardianDaemonStatusError.unavailable
+    }
 }
 
 private func resolveOrigin(_ token: String) throws -> RecoveryOrigin {
@@ -99,7 +177,7 @@ private func handle(_ message: [String: Any]) {
         result(id: id, value: [
             "protocolVersion": requestedVersion,
             "capabilities": ["tools": [:]],
-            "serverInfo": ["name": "codex-guardian", "version": "0.4.0"],
+            "serverInfo": ["name": "codex-guardian", "version": "0.5.0"],
         ])
 
     case "notifications/initialized":
@@ -119,6 +197,46 @@ private func handle(_ message: [String: Any]) {
             "description": "Optional fallback instructions. Never include credentials or private user data.",
         ]
         result(id: id, value: ["tools": [
+            [
+                "name": "guardian_status",
+                "description": "Read the durable Guardian daemon generation and shadow operation count. This never restarts Codex.",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [:],
+                    "additionalProperties": false,
+                ],
+            ],
+            [
+                "name": "recover_agent",
+                "description": "Queue automatic exact-task recovery through the always-on Guardian app. Guardian first uses an idempotent native app-server continuation without restarting Desktop. No heartbeat automation or manual Send step is required.",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "recovery_prompt": fallbackPrompt,
+                        "origin_token": originToken,
+                    ],
+                    "required": ["origin_token"],
+                    "additionalProperties": false,
+                ],
+                "outputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "state": ["type": "string", "const": "queued_native"],
+                        "request_id": ["type": "string"],
+                        "thread_id": ["type": "string"],
+                        "restarts_desktop": ["type": "boolean", "const": false],
+                        "next_action": ["type": "string"],
+                    ],
+                    "required": [
+                        "state",
+                        "request_id",
+                        "thread_id",
+                        "restarts_desktop",
+                        "next_action",
+                    ],
+                    "additionalProperties": false,
+                ],
+            ],
             [
                 "name": "prepare_recovery",
                 "description": "Resolve the exact originating desktop task without restarting Codex. Then call codex_app__send_message_to_thread with the returned thread_id and recovery_prompt. This is the preferred recovery path.",
@@ -199,7 +317,7 @@ private func handle(_ message: [String: Any]) {
             ],
             [
                 "name": "ack_recovery",
-                "description": "Acknowledge that the exact task is moving again. Delete the returned heartbeat automation first, then call this after meaningful recovered progress.",
+                "description": "Acknowledge that the exact task is moving again after meaningful recovered progress. Native recovery has no heartbeat automation to delete. For hard recovery, delete the returned heartbeat automation first.",
                 "inputSchema": [
                     "type": "object",
                     "properties": ["origin_token": originToken],
@@ -213,6 +331,8 @@ private func handle(_ message: [String: Any]) {
         guard let params = message["params"] as? [String: Any],
               let toolName = params["name"] as? String,
               [
+                "guardian_status",
+                "recover_agent",
                 "prepare_recovery",
                 "prepare_restart",
                 "restart_codex",
@@ -220,6 +340,18 @@ private func handle(_ message: [String: Any]) {
                 "ack_recovery",
               ].contains(toolName) else {
             writeError(id: id, code: -32602, message: "Unknown tool")
+            return
+        }
+        if toolName == "guardian_status" {
+            do {
+                try toolResult(id: id, payload: daemonStatusPayload())
+            } catch {
+                writeError(
+                    id: id,
+                    code: -32603,
+                    message: "Guardian daemon is unavailable or untrusted."
+                )
+            }
             return
         }
         let arguments = params["arguments"] as? [String: Any] ?? [:]
@@ -230,6 +362,29 @@ private func handle(_ message: [String: Any]) {
         }
         do {
             switch toolName {
+            case "recover_agent":
+                let origin = try resolveOrigin(originToken)
+                let fallbackPrompt = recoveryPrompt(
+                    from: arguments,
+                    originToken: originToken
+                )
+                let request = RestartRequest(
+                    threadID: origin.threadID,
+                    recoveryPrompt: fallbackPrompt,
+                    contextSnapshot: origin.contextSnapshot,
+                    originToken: originToken,
+                    requestMode: .nativeFirst
+                )
+                let requestID = try store.enqueueUnique(request)
+                launchGuardianIfNeeded()
+                try toolResult(id: id, payload: [
+                    "state": "queued_native",
+                    "request_id": requestID.uuidString,
+                    "thread_id": origin.threadID,
+                    "restarts_desktop": false,
+                    "next_action": "End this turn. Guardian now owns one idempotent exact-task continuation; do not queue another recovery with a new token.",
+                ])
+
             case "prepare_recovery":
                 let origin = try resolveOrigin(originToken)
                 let fallbackPrompt = recoveryPrompt(from: arguments, originToken: originToken)
@@ -321,6 +476,28 @@ private func handle(_ message: [String: Any]) {
                 ])
 
             case "ack_recovery":
+                do {
+                    let acknowledgement = try GuardianNativeRecoveryAcknowledger(
+                        journal: GuardianJournal(
+                            databaseURL: store.directory.appending(
+                                path: "guardian.sqlite"
+                            )
+                        ),
+                        store: store
+                    ).acknowledge(originToken: originToken)
+                    try toolResult(id: id, payload: [
+                        "state": "acknowledged",
+                        "mode": "native",
+                        "operation_id": acknowledgement.operationID.uuidString,
+                        "thread_id": acknowledgement.threadID,
+                        "turn_id": acknowledgement.turnID,
+                        "message_item_id": acknowledgement.messageItemID,
+                        "already_acknowledged": acknowledgement.alreadyAcknowledged,
+                    ])
+                    return
+                } catch GuardianNativeRecoveryAcknowledgementError.requestNotFound {
+                    // No native operation owns this origin. Preserve legacy heartbeat ACK.
+                }
                 guard let delivered = try store.request(originToken: originToken),
                       let automationID = delivered.continuationAutomationID else {
                     writeError(id: id, code: -32602, message: "Recovery request was not found.")

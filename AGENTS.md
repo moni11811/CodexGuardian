@@ -2,6 +2,44 @@
 
 Guardian has two recovery paths. Prefer native same-task recovery. Use a hard restart only when the desktop runtime itself must restart.
 
+## Outcome-first execution guard
+
+Before substantial work, state one user-visible outcome and the direct evidence
+that would prove it. Keep that outcome separate from supporting artifacts.
+
+Status must lead with whether the requested user-visible outcome works now.
+Tests and documentation follow it; they never replace it.
+
+Research, scaffolding, test counts, and documentation are not the deliverable unless the user requested them.
+Do not describe them as successful delivery while the critical user flow is
+unproven or failing.
+
+After a feasibility gate fails, stop downstream implementation.
+Perform at most one changed, evidence-backed fallback. If it also fails, preserve
+work, state the exact missing capability, and stop. Never build later phases to
+create the appearance of progress.
+
+After three bounded tool or research rounds without movement toward the user-visible outcome, stop and re-evaluate the route.
+The next action must change the hypothesis or directly test the critical path.
+Automatic goal continuation does not waive this stop-loss.
+
+Use the standard Codex or Claude permission system. ClosedDexter adds no custom
+allow/deny dialogs, PreToolUse permission broker, or mandatory task ledger.
+
+A proof-lane failure does not block an independent direct outcome. It limits
+only that proof or release claim; repair the lane separately.
+
+If a goal is blocked by a required external capability, do only novel,
+bounded unblock checks. Do not spend the blocked interval on downstream scope.
+Report the smallest external change that would unblock the real outcome.
+
+Before ending substantial work, answer these questions plainly:
+
+1. Does the user-visible flow work now?
+2. What direct live evidence proves it?
+3. If it does not work, why did work stop here?
+4. Did any external mutation occur, and where was it explicitly authorized?
+
 ## Native same-task recovery
 
 1. Generate a fresh UUID and place it in the current task immediately before the MCP call.

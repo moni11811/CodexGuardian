@@ -14,8 +14,29 @@ private struct GeneratedRecoveryPrompt {
 @available(macOS 26.0, *)
 struct AppleRecoveryPromptGenerator {
     func generate(snapshot: String, fallback: String) async -> String {
+        let sanitizedSnapshot = String(
+            RecoveryContextExtractor()
+                .sanitize(snapshot, originToken: "")
+                .prefix(GuardianAdvisor.maximumInputCharacters)
+        )
+        guard !sanitizedSnapshot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return fallback
+        }
+        let context = GuardianAdvisorContext(
+            failureFamily: .thread,
+            taskState: .recovering,
+            blockers: ["Recovery continuation requires a grounded next step."],
+            verifiedEvents: [sanitizedSnapshot],
+            repairHistory: [],
+            diffSummary: nil,
+            continuationFallback: fallback,
+            evidenceIsComplete: true
+        )
         let model = SystemLanguageModel.default
-        guard case .available = model.availability else { return fallback }
+        guard case .available = model.availability else {
+            return await GuardianAdvisor(model: nil)
+                .advise(for: context).continuationDraft ?? fallback
+        }
 
         let session = LanguageModelSession(
             model: model,
@@ -30,17 +51,24 @@ struct AppleRecoveryPromptGenerator {
         do {
             let response = try await session.respond(to: """
                 Last sanitized task state:
-                \(snapshot)
+                \(sanitizedSnapshot)
 
                 Safe fallback if evidence is incomplete:
                 \(fallback)
                 """, generating: GeneratedRecoveryPrompt.self)
-            return RecoveryPromptPolicy().select(
-                generated: response.content.prompt,
-                fallback: fallback
+            let candidate = GuardianAdviceCandidate(
+                summary: "Verified recovery context is available for continuation.",
+                likelyFailureFamily: .thread,
+                suggestedDiagnostic: .requestFreshSnapshot,
+                continuationDraft: response.content.prompt,
+                uncertainty: "The next action is grounded only in the supplied recovery context."
             )
+            let advice = await GuardianAdvisor(model: { _ in candidate })
+                .advise(for: context)
+            return advice.continuationDraft ?? fallback
         } catch {
-            return fallback
+            return await GuardianAdvisor(model: nil)
+                .advise(for: context).continuationDraft ?? fallback
         }
     }
 }

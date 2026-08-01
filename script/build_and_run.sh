@@ -2,6 +2,7 @@
 set -euo pipefail
 
 MODE="${1:-run}"
+BUILD_CONFIGURATION="${CODEX_GUARDIAN_BUILD_CONFIGURATION:-debug}"
 APP_NAME="CodexGuardian"
 BUNDLE_ID="com.moni.codexguardian"
 MIN_SYSTEM_VERSION="14.0"
@@ -20,11 +21,21 @@ ICON_SOURCE="$ROOT_DIR/Assets/CodexGuardian.svg"
 ICONSET="$DIST_DIR/CodexGuardian.iconset"
 ICON_FILE="$APP_RESOURCES/CodexGuardian.icns"
 
-pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+case "$BUILD_CONFIGURATION" in
+  debug|release) ;;
+  *)
+    echo "invalid CODEX_GUARDIAN_BUILD_CONFIGURATION: $BUILD_CONFIGURATION" >&2
+    exit 2
+    ;;
+esac
+
+if [[ "$MODE" != "--build-only" && "$MODE" != "build-only" ]]; then
+  /usr/bin/pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+fi
 
 cd "$ROOT_DIR"
-swift build
-BUILD_DIR="$(swift build --show-bin-path)"
+swift build -c "$BUILD_CONFIGURATION"
+BUILD_DIR="$(swift build -c "$BUILD_CONFIGURATION" --show-bin-path)"
 
 mkdir -p "$APP_MACOS" "$APP_SHARED_SUPPORT" "$APP_RESOURCES" "$MCP_DIR" "$ICONSET"
 APP_BINARY_NEXT="$APP_BINARY.next"
@@ -32,13 +43,22 @@ MCP_BINARY="$MCP_DIR/codex-guardian-mcp"
 MCP_BINARY_NEXT="$MCP_BINARY.next"
 EMBEDDED_MCP_BINARY="$APP_SHARED_SUPPORT/codex-guardian-mcp"
 EMBEDDED_MCP_BINARY_NEXT="$EMBEDDED_MCP_BINARY.next"
+DAEMON_BINARY="$APP_SHARED_SUPPORT/guardian-daemon"
+DAEMON_BINARY_NEXT="$DAEMON_BINARY.next"
+CLI_BINARY="$APP_SHARED_SUPPORT/guardianctl"
+CLI_BINARY_NEXT="$CLI_BINARY.next"
 cp "$BUILD_DIR/$APP_NAME" "$APP_BINARY_NEXT"
 cp "$BUILD_DIR/codex-guardian-mcp" "$MCP_BINARY_NEXT"
 cp "$BUILD_DIR/codex-guardian-mcp" "$EMBEDDED_MCP_BINARY_NEXT"
-chmod +x "$APP_BINARY_NEXT" "$MCP_BINARY_NEXT" "$EMBEDDED_MCP_BINARY_NEXT"
+cp "$BUILD_DIR/guardian-daemon" "$DAEMON_BINARY_NEXT"
+cp "$BUILD_DIR/guardianctl" "$CLI_BINARY_NEXT"
+chmod +x "$APP_BINARY_NEXT" "$MCP_BINARY_NEXT" "$EMBEDDED_MCP_BINARY_NEXT" \
+  "$DAEMON_BINARY_NEXT" "$CLI_BINARY_NEXT"
 mv -f "$APP_BINARY_NEXT" "$APP_BINARY"
 mv -f "$MCP_BINARY_NEXT" "$MCP_BINARY"
 mv -f "$EMBEDDED_MCP_BINARY_NEXT" "$EMBEDDED_MCP_BINARY"
+mv -f "$DAEMON_BINARY_NEXT" "$DAEMON_BINARY"
+mv -f "$CLI_BINARY_NEXT" "$CLI_BINARY"
 
 for spec in "16 icon_16x16.png" "32 icon_16x16@2x.png" "32 icon_32x32.png" "64 icon_32x32@2x.png" "128 icon_128x128.png" "256 icon_128x128@2x.png" "256 icon_256x256.png" "512 icon_256x256@2x.png" "512 icon_512x512.png" "1024 icon_512x512@2x.png"; do
   size="${spec%% *}"
@@ -65,7 +85,7 @@ cat >"$INFO_PLIST" <<PLIST
   <key>LSMinimumSystemVersion</key>
   <string>$MIN_SYSTEM_VERSION</string>
   <key>LSUIElement</key>
-  <true/>
+  <false/>
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>NSPrincipalClass</key>

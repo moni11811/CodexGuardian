@@ -2,20 +2,51 @@ import AppKit
 import Combine
 import Darwin
 import Foundation
+import GuardianClient
 import GuardianCore
+
+private enum NativeRecoveryAppError: Error {
+    case automaticRestartRequiresAuthoritativeInventory
+}
 
 @MainActor
 final class AppModel: ObservableObject {
     @Published private(set) var status = "Watching for MCP requests"
+    @Published private(set) var daemonStatus = "Daemon: checking"
+    @Published private(set) var daemonTasks: [GuardianIPCTaskSnapshot] = []
+    @Published private(set) var daemonOperations: [GuardianIPCOperationSnapshot] = []
+    @Published private(set) var daemonOperationHistory: [GuardianIPCOperationHistoryItem] = []
+    @Published private(set) var daemonOperationHistoryCompleteness: GuardianIPCOperationHistoryCompleteness?
+    @Published private(set) var daemonOperationHistoryTotalCount = 0
+
+    var daemonOperationHistoryIsComplete: Bool {
+        daemonOperationHistoryCompleteness == .complete
+    }
+    @Published private(set) var daemonSnapshotCapturedAt: Date?
+    @Published private(set) var taskInventoryCompleteness: TaskInventoryCompleteness = .incomplete
+    @Published var forceRestartConfirmationRequested = false
 
     private let store = RestartRequestStore()
     private let activityScanner = CodexTaskActivityScanner()
     private let quiescencePolicy = RestartQuiescencePolicy()
     private let automationVerifier = CodexRecoveryAutomationVerifier()
     private let hardRestartGate = HardRestartGate()
+    private let recoveryDispatchPolicy = GuardianRecoveryDispatchPolicy()
+    private let legacyAuthorityLeaseOwnerID = UUID()
+    private lazy var authorityJournal: GuardianJournal? = {
+        return try? GuardianJournal(
+            databaseURL: store.directory.appending(path: "guardian.sqlite")
+        )
+    }()
+    private lazy var nativeRecoveryOutbox: GuardianProtectedOutbox? = {
+        guard let authorityJournal else { return nil }
+        return GuardianProtectedOutbox(journal: authorityJournal)
+    }()
     private var timer: Timer?
     private var recoveryInProgress = false
     private var automaticRecoveryBlocked = false
+    private var daemonProbeInProgress = false
+    private var lastDaemonProbeAt = Date.distantPast
 
     init() {
         try? store.recoverClaims()
@@ -23,28 +54,312 @@ final class AppModel: ObservableObject {
             status = "Preserved \(blocked.count) legacy restart request(s)"
         }
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.poll() }
+            Task { @MainActor in
+                self?.poll()
+                self?.refreshDaemonStatusIfNeeded()
+            }
         }
+        refreshDaemonStatusIfNeeded()
     }
 
     func requestManualRecovery() {
         guard !recoveryInProgress else { return }
-        automaticRecoveryBlocked = false
-        recoveryInProgress = true
-        status = "Force restarting Codex"
-        restartCodex(using: [RestartRequest(delaySeconds: 1)])
+        do {
+            let requests = try store.peekAllPending()
+            guard let authorityFence = currentAuthorityFence() else {
+                status = "Force restart blocked: authority unavailable"
+                return
+            }
+            let decision = GuardianManualRestartPolicy().decision(
+                requests: requests,
+                verifiedAutomationIDs: verifiedAutomationIDs(for: requests),
+                authorityFence: authorityFence
+            )
+            guard decision == .allowed else {
+                switch decision {
+                case .blocked(.authorityTransferred):
+                    status = "Force restart forwarded to daemon"
+                case .blocked(.authorityUnprovable):
+                    status = "Force restart blocked: authority unavailable"
+                default:
+                    status = requests.isEmpty
+                        ? "Force restart blocked: no armed recovery"
+                        : "Force restart blocked: continuation not verified"
+                }
+                return
+            }
+            automaticRecoveryBlocked = false
+            recoveryInProgress = true
+            status = "Preparing armed recovery"
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let prepared = await prepareRecoveryPrompts(for: requests)
+                do {
+                    let current = try store.peekAllPending()
+                    guard Set(current.map(\.id)) == Set(requests.map(\.id)) else {
+                        status = "Force restart blocked: recovery request changed"
+                        recoveryInProgress = false
+                        return
+                    }
+                    let ids = Set(requests.map(\.id))
+                    try store.claimPending(ids: ids)
+                    try store.updateClaimedRequests(prepared)
+                    restartCodex(
+                        using: prepared,
+                        claimedRequestIDs: ids,
+                        bypassQuietGate: true
+                    )
+                } catch {
+                    try? store.recoverClaims()
+                    status = "Force restart blocked: cannot arm continuation"
+                    recoveryInProgress = false
+                }
+            }
+        } catch {
+            status = "Force restart blocked: request state unavailable"
+        }
+    }
+
+    func requestForceRestartConfirmation() {
+        forceRestartConfirmationRequested = true
+    }
+
+    func refreshNow() {
+        lastDaemonProbeAt = .distantPast
+        refreshDaemonStatusIfNeeded()
+    }
+
+    func tasks(in section: GuardianOperatorSection) -> [GuardianIPCTaskSnapshot] {
+        let policy = GuardianOperatorPolicy(maximumSnapshotAge: 10)
+        return daemonTasks
+            .filter { policy.section(for: $0.state) == section }
+            .sorted { $0.threadID < $1.threadID }
+    }
+
+    var readinessNotice: GuardianOperatorReadinessNotice? {
+        GuardianOperatorPolicy(maximumSnapshotAge: 10).readinessNotice(
+            operations: daemonOperations
+        )
+    }
+
+    private func refreshDaemonStatusIfNeeded() {
+        guard !daemonProbeInProgress,
+              Date().timeIntervalSince(lastDaemonProbeAt) >= 2 else { return }
+        daemonProbeInProgress = true
+        lastDaemonProbeAt = Date()
+        Task { @MainActor [weak self] in
+            await self?.probeDaemon()
+        }
+    }
+
+    private func probeDaemon() async {
+        defer { daemonProbeInProgress = false }
+        do {
+            let stateDirectory = FileManager.default.urls(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask
+            )[0].appending(path: "CodexGuardian", directoryHint: .isDirectory)
+            let credential = try GuardianCredentialFile.load(
+                at: stateDirectory.appending(path: "credentials/mac-ui.token")
+            )
+            let client = GuardianClient(
+                clientID: GuardianLocalClientDefaults.macUIID,
+                credential: credential,
+                transport: GuardianUnixSocketTransport(
+                    socketPath: stateDirectory.appending(path: "guardian.sock").path,
+                    expectedPeerExecutablePath: try GuardianLocalDaemonEndpoint
+                        .expectedExecutablePath()
+                )
+            )
+            let snapshot = try await client.observeSnapshot(
+                originThreadID: "codex-guardian-mac-ui",
+                deadline: Date().addingTimeInterval(2)
+            )
+            daemonTasks = snapshot.tasks
+            daemonOperations = snapshot.operations
+            daemonOperationHistory = snapshot.operationHistory?.items ?? []
+            daemonOperationHistoryCompleteness = snapshot.operationHistory?.completeness
+            daemonOperationHistoryTotalCount = snapshot.operationHistory?.totalCount ?? 0
+            daemonSnapshotCapturedAt = snapshot.capturedAt
+            taskInventoryCompleteness = snapshot.taskInventoryCompleteness
+            daemonStatus = snapshot.taskInventoryCompleteness == .complete
+                ? "Daemon: \(snapshot.tasks.count) tasks"
+                : "Daemon: observer incomplete"
+        } catch {
+            daemonStatus = "Daemon: unavailable"
+            taskInventoryCompleteness = .incomplete
+            daemonOperations = []
+            daemonOperationHistory = []
+            daemonOperationHistoryCompleteness = nil
+            daemonOperationHistoryTotalCount = 0
+        }
     }
 
     private func poll() {
         guard !recoveryInProgress, !automaticRecoveryBlocked else { return }
         do {
-            guard !(try store.peekAllPending()).isEmpty else { return }
-            recoveryInProgress = true
-            Task { @MainActor [weak self] in
-                await self?.waitForSafeRestart()
+            switch recoveryDispatchPolicy.decision(
+                pendingRequests: try store.peekAllPending()
+            ) {
+            case .idle:
+                return
+            case .native(let request):
+                try store.claimPending(ids: [request.id])
+                recoveryInProgress = true
+                status = "Delivering native recovery to exact task"
+                executeNativeRecovery(request)
+            case .hardRestart:
+                guard currentAuthorityFence()?.owner == .legacy else {
+                    status = "Legacy recovery disabled; daemon owns restart"
+                    automaticRecoveryBlocked = true
+                    return
+                }
+                recoveryInProgress = true
+                Task { @MainActor [weak self] in
+                    await self?.waitForSafeRestart()
+                }
             }
         } catch {
             status = "Invalid request: \(error.localizedDescription)"
+        }
+    }
+
+    private func executeNativeRecovery(_ request: RestartRequest) {
+        guard let authorityJournal, let nativeRecoveryOutbox else {
+            try? store.markNativeFailed(id: request.id)
+            status = "Native recovery blocked: durable state unavailable"
+            recoveryInProgress = false
+            return
+        }
+        let store = store
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let (execution, launchedDesktop) = try await Task.detached(
+                    priority: .userInitiated
+                ) {
+                    let controller = CodexProcessController(
+                        requirement: .openAIProduction,
+                        discovery: MacCodexProcessDiscovery()
+                    )
+                    let application = try controller.resolveApplication()
+                    guard request.targetBundleIdentifier == application.bundleIdentifier else {
+                        throw CodexProcessSelectionError.bundleIdentifierMismatch
+                    }
+                    let executableURL = try CodexAppServerExecutablePolicy()
+                        .executableURL(for: application)
+                    let runningProcess = try controller.captureRunningProcessIfPresent(
+                        matching: application
+                    )
+                    let presenceDecision = CodexDesktopRecoveryBoundaryPolicy()
+                        .decision(
+                            desktopIsRunning: runningProcess != nil,
+                            nativeDeliveryFailed: false,
+                            inventoryIsAuthoritativeAndSafe: false
+                        )
+                    let launchedDesktop: Bool
+                    switch presenceDecision {
+                    case .launchBeforeNativeRecovery:
+                        try controller.launch(application)
+                        var verified = false
+                        for _ in 0..<40 where !verified {
+                            do {
+                                _ = try controller.verifyLaunch(
+                                    application: application,
+                                    previous: nil
+                                )
+                                verified = true
+                            } catch CodexProcessSelectionError.processNotFound {
+                                try await Task.sleep(for: .milliseconds(250))
+                            }
+                        }
+                        guard verified else {
+                            throw CodexProcessControllerError.launchFailed
+                        }
+                        launchedDesktop = true
+                    case .continueNativeRecovery:
+                        launchedDesktop = false
+                    case .automaticRestartAllowed, .humanForceRequired:
+                        throw NativeRecoveryAppError
+                            .automaticRestartRequiresAuthoritativeInventory
+                    }
+                    let executor = GuardianNativeRecoveryExecutor(
+                        journal: authorityJournal,
+                        outbox: nativeRecoveryOutbox,
+                        store: store
+                    )
+
+                    func attempt() async throws -> GuardianNativeRecoveryExecutionResult {
+                        let transport = try CodexAppServerStdioTransport(
+                            executableURL: executableURL
+                        )
+                        defer { transport.close() }
+                        return try await executor.execute(
+                            request: request,
+                            transport: transport,
+                            deadline: Date().addingTimeInterval(600)
+                        )
+                    }
+
+                    do {
+                        return (try await attempt(), launchedDesktop)
+                    } catch {
+                        guard let token = request.originToken,
+                              let stored = try store.request(originToken: token),
+                              let operationID = stored.nativeOperationID,
+                              try authorityJournal.outboxEntries(
+                                operationID: operationID
+                              ).contains(where: { $0.state == .awaitingReconciliation })
+                        else { throw error }
+                        do {
+                            return (try await attempt(), launchedDesktop)
+                        } catch {
+                            let desktopIsRunning = try controller
+                                .captureRunningProcessIfPresent(
+                                    matching: application
+                                ) != nil
+                            let boundary = CodexDesktopRecoveryBoundaryPolicy()
+                                .decision(
+                                    desktopIsRunning: desktopIsRunning,
+                                    nativeDeliveryFailed: true,
+                                    inventoryIsAuthoritativeAndSafe: false
+                                )
+                            if boundary == .humanForceRequired {
+                                throw NativeRecoveryAppError
+                                    .automaticRestartRequiresAuthoritativeInventory
+                            }
+                            throw error
+                        }
+                    }
+                }.value
+                switch execution {
+                case .delivered(_, let delivery, let alreadySubmitted):
+                    if launchedDesktop {
+                        status = "Codex launched; native recovery delivered; waiting for ACK"
+                    } else {
+                        status = alreadySubmitted
+                            ? "Native recovery reconciled; waiting for exact ACK"
+                            : "Native recovery delivered; waiting for exact ACK"
+                    }
+                    daemonStatus = "Exact task: \(delivery.threadID)"
+                case .terminalFailure(_, _, _, let outcome):
+                    status = "Native recovery \(outcome.rawValue); Desktop not restarted"
+                }
+            } catch NativeRecoveryAppError
+                .automaticRestartRequiresAuthoritativeInventory {
+                status = "Running Codex restart needs human Force Restart confirmation"
+            } catch {
+                let uncertain = request.originToken.flatMap { token in
+                    try? store.request(originToken: token)
+                }?.recoveryPhase == .nativeExecuting
+                if uncertain {
+                    status = "Native recovery uncertain; duplicate send blocked"
+                } else {
+                    try? store.markNativeFailed(id: request.id)
+                    status = "Native recovery failed closed"
+                }
+            }
+            recoveryInProgress = false
         }
     }
 
@@ -88,33 +403,9 @@ final class AppModel: ObservableObject {
                 case .waitForQuietPeriod:
                     status = "Waiting for Codex tasks to become quiet"
                 case .restart:
-                    status = "Preparing recovery prompts"
-                    let prepared = await prepareRecoveryPrompts(for: requests)
-                    let currentRequests = try store.peekAllPending()
-                    guard Set(currentRequests.map(\.id)) == Set(requests.map(\.id)) else {
-                        status = "New recovery request found; checking tasks again"
-                        continue
-                    }
-                    let finalScan = try await Task.detached(priority: .utility) {
-                        try scanner.scan(modifiedSince: scanStart)
-                    }.value
-                    guard finalScan.isComplete,
-                          quiescencePolicy.decision(
-                            requests: currentRequests,
-                            activities: finalScan.activities
-                          ) == .restart else {
-                        status = "Task activity changed; restart postponed"
-                        continue
-                    }
-                    let claimedIDs = Set(requests.map(\.id))
-                    do {
-                        try store.claimPending(ids: claimedIDs)
-                        try store.updateClaimedRequests(prepared)
-                    } catch {
-                        try? store.recoverClaims()
-                        throw error
-                    }
-                    restartCodex(using: prepared, claimedRequestIDs: claimedIDs)
+                    status = "Ready; automatic Desktop boundary unavailable"
+                    automaticRecoveryBlocked = true
+                    recoveryInProgress = false
                     return
                 }
             } catch {
@@ -149,56 +440,134 @@ final class AppModel: ObservableObject {
 
     private func restartCodex(
         using requests: [RestartRequest],
-        claimedRequestIDs: Set<UUID> = []
+        claimedRequestIDs: Set<UUID> = [],
+        bypassQuietGate: Bool = false
     ) {
         guard let request = requests.first else {
             recoveryInProgress = false
             return
         }
-        if !claimedRequestIDs.isEmpty,
-           !automaticRestartStillSafe(requests: requests) {
+        let restartIsStillAuthorized = bypassQuietGate
+            ? automaticContinuationsReady(requests)
+            : automaticRestartStillSafe(requests: requests)
+        if !claimedRequestIDs.isEmpty, !restartIsStillAuthorized {
             try? store.recoverClaims()
             status = "Task activity changed; restart postponed"
             recoveryInProgress = false
             poll()
             return
         }
-        let launchPlan = CodexLaunchPlan(bundleIdentifier: request.targetBundleIdentifier)
-        let resolvedApplicationURL = NSWorkspace.shared.urlForApplication(
-            withBundleIdentifier: request.targetBundleIdentifier
-        )
-        guard resolvedApplicationURL != nil || launchPlan.fallbackApplicationPaths.contains(where: {
-            FileManager.default.fileExists(atPath: $0)
-        }) else {
+        guard let authorityJournal else {
             try? store.recoverClaims()
-            status = "Codex application not found"
+            status = "Restart blocked: authority unavailable"
             automaticRecoveryBlocked = true
             recoveryInProgress = false
             return
         }
-
-        let running = NSRunningApplication.runningApplications(
-            withBundleIdentifier: request.targetBundleIdentifier
-        )
-        let previousProcessIDs = Set(running.map(\.processIdentifier))
-        var applicationPaths = launchPlan.fallbackApplicationPaths
-        if let resolvedApplicationURL {
-            applicationPaths.append(resolvedApplicationURL.path)
+        let authorityLease: GuardianLease
+        let authorityPermit: GuardianAuthorityPermit
+        do {
+            authorityLease = try authorityJournal.acquireLease(
+                resource: GuardianAuthorityFence.cutoverLeaseResource,
+                ownerID: legacyAuthorityLeaseOwnerID,
+                now: Date(),
+                duration: 180
+            )
+            authorityPermit = try authorityJournal.issueAuthorityPermit(
+                owner: .legacy,
+                at: Date()
+            )
+            try authorityJournal.validateAuthorityPermit(authorityPermit, at: Date())
+        } catch {
+            try? store.recoverClaims()
+            status = "Restart blocked: daemon authority active"
+            automaticRecoveryBlocked = true
+            recoveryInProgress = false
+            return
         }
+        let trustRequirement = CodexProcessTrustRequirement.openAIProduction
+        guard request.targetBundleIdentifier == trustRequirement.bundleIdentifier else {
+            try? authorityJournal.releaseLease(authorityLease)
+            try? store.recoverClaims()
+            status = "Restart blocked: unexpected application identity"
+            automaticRecoveryBlocked = true
+            recoveryInProgress = false
+            return
+        }
+        let processController = CodexProcessController(
+            requirement: trustRequirement,
+            discovery: MacCodexProcessDiscovery()
+        )
+        let trustedApplication: CodexApplicationCandidate
+        let previousProcess: CodexRunningProcessCandidate?
+        do {
+            trustedApplication = try processController.resolveApplication()
+            previousProcess = try processController.captureRunningProcessIfPresent(
+                matching: trustedApplication
+            )
+        } catch {
+            try? authorityJournal.releaseLease(authorityLease)
+            try? store.recoverClaims()
+            status = "Restart blocked: Codex process identity unavailable"
+            automaticRecoveryBlocked = true
+            recoveryInProgress = false
+            return
+        }
+        let applicationPaths = [trustedApplication.bundleURLPath]
         let appServerProcessIDs = codexAppServerProcessIDs(
             applicationPaths: applicationPaths
         )
-        running.forEach { $0.terminate() }
-        status = "Stopping Codex"
+        do {
+            try authorityJournal.validateAuthorityPermit(authorityPermit, at: Date())
+        } catch {
+            try? authorityJournal.releaseLease(authorityLease)
+            try? store.recoverClaims()
+            status = "Restart blocked: authority changed"
+            automaticRecoveryBlocked = true
+            recoveryInProgress = false
+            return
+        }
+        if let previousProcess {
+            do {
+                try processController.terminate(previousProcess, force: false)
+            } catch {
+                try? authorityJournal.releaseLease(authorityLease)
+                try? store.recoverClaims()
+                status = "Restart blocked: Codex process changed"
+                automaticRecoveryBlocked = true
+                recoveryInProgress = false
+                return
+            }
+            status = "Stopping verified Codex process"
+        } else {
+            status = "Codex stopped; preparing verified relaunch"
+        }
 
         Task { @MainActor [weak self] in
+            defer { try? authorityJournal.releaseLease(authorityLease) }
             try? await Task.sleep(for: .seconds(2))
-            running.filter(\.isTerminated.negated).forEach { $0.forceTerminate() }
-
-            for _ in 0..<20 where !NSRunningApplication.runningApplications(
-                withBundleIdentifier: request.targetBundleIdentifier
-            ).isEmpty {
-                try? await Task.sleep(for: .milliseconds(250))
+            guard (try? authorityJournal.validateAuthorityPermit(
+                authorityPermit,
+                at: Date()
+            )) != nil else {
+                try? self?.store.recoverClaims()
+                self?.status = "Restart halted: authority changed"
+                self?.automaticRecoveryBlocked = true
+                self?.recoveryInProgress = false
+                return
+            }
+            if let previousProcess {
+                let stopped = await self?.finishStoppingCodex(
+                    captured: previousProcess,
+                    controller: processController
+                ) ?? false
+                guard stopped else {
+                    try? self?.store.recoverClaims()
+                    self?.status = "Restart blocked: Codex process epoch changed"
+                    self?.automaticRecoveryBlocked = true
+                    self?.recoveryInProgress = false
+                    return
+                }
             }
 
             await self?.stopCodexAppServers(
@@ -206,24 +575,25 @@ final class AppModel: ObservableObject {
                 applicationPaths: applicationPaths
             )
 
-            let didLaunch = await self?.launchCodex(
-                plan: launchPlan,
-                resolvedApplicationURL: resolvedApplicationURL
-            ) ?? false
-            let currentApplications = NSRunningApplication.runningApplications(
-                withBundleIdentifier: request.targetBundleIdentifier
+            do {
+                try processController.launch(trustedApplication)
+            } catch {
+                try? self?.store.recoverClaims()
+                self?.status = "Relaunch failed: trusted Codex application changed"
+                self?.automaticRecoveryBlocked = true
+                self?.recoveryInProgress = false
+                return
+            }
+            let newProcess = await self?.waitForVerifiedRelaunch(
+                application: trustedApplication,
+                previous: previousProcess,
+                controller: processController
             )
-            let currentProcessIDs = Set(currentApplications.map(\.processIdentifier))
-            let newProcessID = currentProcessIDs.subtracting(previousProcessIDs).first
-            let didRestart = didLaunch && CodexRelaunchPolicy().didRestart(
-                previousProcessIDs: previousProcessIDs,
-                currentProcessIDs: currentProcessIDs
-            )
-            if didRestart, let newProcessID {
+            if let newProcess {
                 self?.status = "Codex relaunched; waiting for app server"
                 let startupReady = await self?.waitForRecoveryStartup(
-                    processIdentifier: newProcessID,
-                    bundleIdentifier: request.targetBundleIdentifier,
+                    process: newProcess,
+                    controller: processController,
                     previousAppServerProcessIDs: appServerProcessIDs,
                     applicationPaths: applicationPaths
                 ) ?? false
@@ -247,7 +617,7 @@ final class AppModel: ObservableObject {
                         do {
                             try self?.store.markClaimAwaitingContinuation(
                                 id: requestID,
-                                processIdentifier: newProcessID,
+                                processIdentifier: newProcess.processID,
                                 restartedAt: Date()
                             )
                             remaining.remove(requestID)
@@ -272,9 +642,7 @@ final class AppModel: ObservableObject {
                 }
             } else {
                 try? self?.store.recoverClaims()
-                self?.status = didLaunch
-                    ? "Restart failed: old Codex process remained"
-                    : "Relaunch failed: Codex application not found"
+                self?.status = "Relaunch failed: verified Codex process unavailable"
                 self?.automaticRecoveryBlocked = true
             }
             self?.recoveryInProgress = false
@@ -294,7 +662,19 @@ final class AppModel: ObservableObject {
     }
 
     private func automaticContinuationsReady(_ requests: [RestartRequest]) -> Bool {
-        let verifiedIDs = Set(requests.compactMap { request -> String? in
+        hardRestartGate.canTerminate(
+            requests: requests,
+            verifiedAutomationIDs: verifiedAutomationIDs(for: requests)
+        )
+    }
+
+    private func currentAuthorityFence() -> GuardianAuthorityFence? {
+        guard let authorityJournal else { return nil }
+        return try? authorityJournal.authorityFence()
+    }
+
+    private func verifiedAutomationIDs(for requests: [RestartRequest]) -> Set<String> {
+        Set(requests.compactMap { request -> String? in
             guard let automationID = request.continuationAutomationID,
                   let originToken = request.originToken,
                   (try? automationVerifier.isArmed(
@@ -304,10 +684,6 @@ final class AppModel: ObservableObject {
                   )) == true else { return nil }
             return automationID
         })
-        return hardRestartGate.canTerminate(
-            requests: requests,
-            verifiedAutomationIDs: verifiedIDs
-        )
     }
 
     private func activityScanStart(earliestRequest: Date) -> Date {
@@ -320,40 +696,68 @@ final class AppModel: ObservableObject {
         return min(minimumLookback, codexLaunchDate ?? minimumLookback)
     }
 
-    private func launchCodex(
-        plan: CodexLaunchPlan,
-        resolvedApplicationURL: URL?
+    private func finishStoppingCodex(
+        captured: CodexRunningProcessCandidate,
+        controller: CodexProcessController
     ) async -> Bool {
-        let policy = CodexRelaunchPolicy()
-        for _ in 0..<3 {
-            let opened = runOpen(arguments: ["-b", plan.bundleIdentifier])
-            try? await Task.sleep(for: .seconds(1))
-            let running = !NSRunningApplication.runningApplications(
-                withBundleIdentifier: plan.bundleIdentifier
-            ).isEmpty
-            if policy.isRecovered(openSucceeded: opened, applicationIsRunning: running) {
-                return true
+        do {
+            if let observed = try controller.captureRunningProcessIfPresent(
+                matching: captured.application
+            ) {
+                try CodexProcessSelectionPolicy().validateSignalTarget(
+                    captured: captured,
+                    observed: observed
+                )
+                try controller.terminate(captured, force: true)
+            }
+        } catch {
+            do {
+                return try controller.captureRunningProcessIfPresent(
+                    matching: captured.application
+                ) == nil
+            } catch {
+                return false
             }
         }
 
-        var candidatePaths = plan.fallbackApplicationPaths
-        if let resolvedApplicationURL {
-            candidatePaths.insert(resolvedApplicationURL.path, at: 0)
-        }
-
-        for path in candidatePaths where FileManager.default.fileExists(atPath: path) {
-            for _ in 0..<3 {
-                let opened = runOpen(arguments: ["-n", path])
-                try? await Task.sleep(for: .seconds(1))
-                let running = !NSRunningApplication.runningApplications(
-                    withBundleIdentifier: plan.bundleIdentifier
-                ).isEmpty
-                if policy.isRecovered(openSucceeded: opened, applicationIsRunning: running) {
+        for _ in 0..<20 {
+            do {
+                guard let observed = try controller.captureRunningProcessIfPresent(
+                    matching: captured.application
+                ) else {
                     return true
                 }
+                try CodexProcessSelectionPolicy().validateSignalTarget(
+                    captured: captured,
+                    observed: observed
+                )
+            } catch {
+                return false
             }
+            try? await Task.sleep(for: .milliseconds(250))
         }
         return false
+    }
+
+    private func waitForVerifiedRelaunch(
+        application: CodexApplicationCandidate,
+        previous: CodexRunningProcessCandidate?,
+        controller: CodexProcessController
+    ) async -> CodexRunningProcessCandidate? {
+        for _ in 0..<40 {
+            do {
+                return try controller.verifyLaunch(
+                    application: application,
+                    previous: previous
+                )
+            } catch CodexProcessSelectionError.processNotFound,
+                    CodexProcessControllerError.processDidNotRestart {
+                try? await Task.sleep(for: .milliseconds(250))
+            } catch {
+                return nil
+            }
+        }
+        return nil
     }
 
     private func runOpen(arguments: [String]) -> Bool {
@@ -386,16 +790,26 @@ final class AppModel: ObservableObject {
     }
 
     private func waitForRecoveryStartup(
-        processIdentifier: Int32,
-        bundleIdentifier: String,
+        process: CodexRunningProcessCandidate,
+        controller: CodexProcessController,
         previousAppServerProcessIDs: Set<Int32>,
         applicationPaths: [String]
     ) async -> Bool {
         var tracker = CodexRecoveryStartupTracker()
         for _ in 0..<150 {
-            let desktopIsRunning = NSRunningApplication.runningApplications(
-                withBundleIdentifier: bundleIdentifier
-            ).contains { $0.processIdentifier == processIdentifier }
+            let desktopIsRunning: Bool
+            do {
+                let observed = try controller.captureRunningProcess(
+                    matching: process.application
+                )
+                try CodexProcessSelectionPolicy().validateSignalTarget(
+                    captured: process,
+                    observed: observed
+                )
+                desktopIsRunning = true
+            } catch {
+                desktopIsRunning = false
+            }
             let newAppServerProcessIDs = codexAppServerProcessIDs(
                 applicationPaths: applicationPaths
             ).subtracting(previousAppServerProcessIDs)
@@ -422,8 +836,4 @@ final class AppModel: ObservableObject {
         let remaining = codexAppServerProcessIDs(applicationPaths: applicationPaths)
         targets.intersection(remaining).forEach { Darwin.kill($0, SIGKILL) }
     }
-}
-
-private extension Bool {
-    var negated: Bool { !self }
 }

@@ -1,0 +1,470 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		01E09815237238978535B013 /* GuardianPhoneProjectionMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5486182C76EBBAE996C4C93 /* GuardianPhoneProjectionMapper.swift */; };
+		236C8F7A481D477745482772 /* GuardianPhoneStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 032CFDD7D2F2D1C6317C13DC /* GuardianPhoneStore.swift */; };
+		2BED06868B9704B014B1F637 /* GuardianPhoneServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E8673589476E93669849294 /* GuardianPhoneServiceTests.swift */; };
+		5DE133E7705FC07FC6C1D925 /* GuardianPhoneService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0B43489BD18991F66C25D9F /* GuardianPhoneService.swift */; };
+		888BE582EBABFC9A875CF8F3 /* GuardianPhoneRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E451F1F5422B30E3091F2E7C /* GuardianPhoneRootView.swift */; };
+		8980B6F72749CB2A367A5B3B /* GuardianPhoneModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 792F90D578EEE3443C927532 /* GuardianPhoneModels.swift */; };
+		90E704E91DD9131593A34F48 /* CodexGuardianPhoneApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E1577F79C0A7BFC47756BB4 /* CodexGuardianPhoneApp.swift */; };
+		A48642092521D4C47870C357 /* GuardianPhonePresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC9C66A0DBB195EDA9C7010 /* GuardianPhonePresentationTests.swift */; };
+		AAE60A82C44ACD426AB12180 /* GuardianPhoneProjectionMapperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8C8C439B76F987DCF3F53A8 /* GuardianPhoneProjectionMapperTests.swift */; };
+		CD8A43CCE99E125A77C8C6D6 /* GuardianPhoneStoreReconnectTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 692D37CF51AB6FA1FF7C7D6C /* GuardianPhoneStoreReconnectTests.swift */; };
+		EF34C5F49B115DCDC9D97571 /* GuardianPhoneCore in Frameworks */ = {isa = PBXBuildFile; productRef = 3C264F6089C6068D30510D2B /* GuardianPhoneCore */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B5F962144FDA0E6B98592A08 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B9374A7D97DDF7A95CD7CD34 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 320E81B04B5BEECF459F7822;
+			remoteInfo = CodexGuardianPhone;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		032CFDD7D2F2D1C6317C13DC /* GuardianPhoneStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuardianPhoneStore.swift; sourceTree = "<group>"; };
+		0E8673589476E93669849294 /* GuardianPhoneServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuardianPhoneServiceTests.swift; sourceTree = "<group>"; };
+		692D37CF51AB6FA1FF7C7D6C /* GuardianPhoneStoreReconnectTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuardianPhoneStoreReconnectTests.swift; sourceTree = "<group>"; };
+		792F90D578EEE3443C927532 /* GuardianPhoneModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuardianPhoneModels.swift; sourceTree = "<group>"; };
+		7DDDEADCD6A824DEE9768DB5 /* CodexGuardianPhoneTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CodexGuardianPhoneTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		7E1577F79C0A7BFC47756BB4 /* CodexGuardianPhoneApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexGuardianPhoneApp.swift; sourceTree = "<group>"; };
+		B0B43489BD18991F66C25D9F /* GuardianPhoneService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuardianPhoneService.swift; sourceTree = "<group>"; };
+		B4736E769B5218D470389627 /* CodexGuardianPhone.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = CodexGuardianPhone.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B5486182C76EBBAE996C4C93 /* GuardianPhoneProjectionMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuardianPhoneProjectionMapper.swift; sourceTree = "<group>"; };
+		DB62E6D803FCF5D41BDF8F9D /* CodexMCPhone */ = {isa = PBXFileReference; lastKnownFileType = folder; name = CodexMCPhone; path = ..; sourceTree = SOURCE_ROOT; };
+		E451F1F5422B30E3091F2E7C /* GuardianPhoneRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuardianPhoneRootView.swift; sourceTree = "<group>"; };
+		E8C8C439B76F987DCF3F53A8 /* GuardianPhoneProjectionMapperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuardianPhoneProjectionMapperTests.swift; sourceTree = "<group>"; };
+		FDC9C66A0DBB195EDA9C7010 /* GuardianPhonePresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuardianPhonePresentationTests.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		3489A0BA65C189C5E509BFF9 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				EF34C5F49B115DCDC9D97571 /* GuardianPhoneCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1530A65CA8484E1098E3A3B3 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B4736E769B5218D470389627 /* CodexGuardianPhone.app */,
+				7DDDEADCD6A824DEE9768DB5 /* CodexGuardianPhoneTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		4D4535E570C6A2936C6448DE /* CodexGuardianPhoneTests */ = {
+			isa = PBXGroup;
+			children = (
+				FDC9C66A0DBB195EDA9C7010 /* GuardianPhonePresentationTests.swift */,
+				E8C8C439B76F987DCF3F53A8 /* GuardianPhoneProjectionMapperTests.swift */,
+				0E8673589476E93669849294 /* GuardianPhoneServiceTests.swift */,
+				692D37CF51AB6FA1FF7C7D6C /* GuardianPhoneStoreReconnectTests.swift */,
+			);
+			path = CodexGuardianPhoneTests;
+			sourceTree = "<group>";
+		};
+		7871BF69D464D616213950F7 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				DB62E6D803FCF5D41BDF8F9D /* CodexMCPhone */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		B09347E2246DC215B967B029 = {
+			isa = PBXGroup;
+			children = (
+				E2F9120C5CFD7150F40E4A8D /* CodexGuardianPhone */,
+				4D4535E570C6A2936C6448DE /* CodexGuardianPhoneTests */,
+				7871BF69D464D616213950F7 /* Packages */,
+				1530A65CA8484E1098E3A3B3 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		E2F9120C5CFD7150F40E4A8D /* CodexGuardianPhone */ = {
+			isa = PBXGroup;
+			children = (
+				7E1577F79C0A7BFC47756BB4 /* CodexGuardianPhoneApp.swift */,
+				792F90D578EEE3443C927532 /* GuardianPhoneModels.swift */,
+				B5486182C76EBBAE996C4C93 /* GuardianPhoneProjectionMapper.swift */,
+				E451F1F5422B30E3091F2E7C /* GuardianPhoneRootView.swift */,
+				B0B43489BD18991F66C25D9F /* GuardianPhoneService.swift */,
+				032CFDD7D2F2D1C6317C13DC /* GuardianPhoneStore.swift */,
+			);
+			path = CodexGuardianPhone;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		320E81B04B5BEECF459F7822 /* CodexGuardianPhone */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B746B6762F8D9753EE148BB3 /* Build configuration list for PBXNativeTarget "CodexGuardianPhone" */;
+			buildPhases = (
+				1E9F9B2C8DD16D610B9C2668 /* Sources */,
+				3489A0BA65C189C5E509BFF9 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CodexGuardianPhone;
+			packageProductDependencies = (
+				3C264F6089C6068D30510D2B /* GuardianPhoneCore */,
+			);
+			productName = CodexGuardianPhone;
+			productReference = B4736E769B5218D470389627 /* CodexGuardianPhone.app */;
+			productType = "com.apple.product-type.application";
+		};
+		441C6F4010297E7A67DDADEA /* CodexGuardianPhoneTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 18219B9314188EE4765FE69E /* Build configuration list for PBXNativeTarget "CodexGuardianPhoneTests" */;
+			buildPhases = (
+				7C26D4543CAAF6D52169254E /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				2CBF83966A86418315126F93 /* PBXTargetDependency */,
+			);
+			name = CodexGuardianPhoneTests;
+			packageProductDependencies = (
+			);
+			productName = CodexGuardianPhoneTests;
+			productReference = 7DDDEADCD6A824DEE9768DB5 /* CodexGuardianPhoneTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		B9374A7D97DDF7A95CD7CD34 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = 893890872757DD19C8E262A5 /* Build configuration list for PBXProject "CodexGuardianPhone" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = B09347E2246DC215B967B029;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				7C86B48AA7851B247D7C2BC9 /* XCLocalSwiftPackageReference ".." */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 1530A65CA8484E1098E3A3B3 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				320E81B04B5BEECF459F7822 /* CodexGuardianPhone */,
+				441C6F4010297E7A67DDADEA /* CodexGuardianPhoneTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1E9F9B2C8DD16D610B9C2668 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				90E704E91DD9131593A34F48 /* CodexGuardianPhoneApp.swift in Sources */,
+				8980B6F72749CB2A367A5B3B /* GuardianPhoneModels.swift in Sources */,
+				01E09815237238978535B013 /* GuardianPhoneProjectionMapper.swift in Sources */,
+				888BE582EBABFC9A875CF8F3 /* GuardianPhoneRootView.swift in Sources */,
+				5DE133E7705FC07FC6C1D925 /* GuardianPhoneService.swift in Sources */,
+				236C8F7A481D477745482772 /* GuardianPhoneStore.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7C26D4543CAAF6D52169254E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A48642092521D4C47870C357 /* GuardianPhonePresentationTests.swift in Sources */,
+				AAE60A82C44ACD426AB12180 /* GuardianPhoneProjectionMapperTests.swift in Sources */,
+				2BED06868B9704B014B1F637 /* GuardianPhoneServiceTests.swift in Sources */,
+				CD8A43CCE99E125A77C8C6D6 /* GuardianPhoneStoreReconnectTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		2CBF83966A86418315126F93 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 320E81B04B5BEECF459F7822 /* CodexGuardianPhone */;
+			targetProxy = B5F962144FDA0E6B98592A08 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		1F74F6F01C4EB2E8F59F7030 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		7F0A64D937E6CA0D38465D08 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Codex Guardian";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to your paired Mac to monitor and recover Codex tasks.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.moni.codexguardian.phone;
+				PRODUCT_MODULE_NAME = CodexGuardianPhone;
+				PRODUCT_NAME = "Codex Guardian";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		85CC7FA7F0C581F9C6E34D18 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		B5AA25D474F8E4BE62EDBAD4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.moni.codexguardian.phone.tests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Codex Guardian.app/Codex Guardian";
+			};
+			name = Release;
+		};
+		D60FB9BD4F4670F028C15901 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.moni.codexguardian.phone.tests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Codex Guardian.app/Codex Guardian";
+			};
+			name = Debug;
+		};
+		FD5301F744C3CD90757B40C5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Codex Guardian";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to your paired Mac to monitor and recover Codex tasks.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.moni.codexguardian.phone;
+				PRODUCT_MODULE_NAME = CodexGuardianPhone;
+				PRODUCT_NAME = "Codex Guardian";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		18219B9314188EE4765FE69E /* Build configuration list for PBXNativeTarget "CodexGuardianPhoneTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D60FB9BD4F4670F028C15901 /* Debug */,
+				B5AA25D474F8E4BE62EDBAD4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		893890872757DD19C8E262A5 /* Build configuration list for PBXProject "CodexGuardianPhone" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				85CC7FA7F0C581F9C6E34D18 /* Debug */,
+				1F74F6F01C4EB2E8F59F7030 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B746B6762F8D9753EE148BB3 /* Build configuration list for PBXNativeTarget "CodexGuardianPhone" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FD5301F744C3CD90757B40C5 /* Debug */,
+				7F0A64D937E6CA0D38465D08 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		7C86B48AA7851B247D7C2BC9 /* XCLocalSwiftPackageReference ".." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ..;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		3C264F6089C6068D30510D2B /* GuardianPhoneCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GuardianPhoneCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = B9374A7D97DDF7A95CD7CD34 /* Project object */;
+}

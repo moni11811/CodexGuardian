@@ -1,0 +1,50 @@
+name: CodexGuardianPhone
+options:
+  bundleIdPrefix: com.moni
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  CodexGuardian:
+    path: ..
+targets:
+  CodexGuardianPhone:
+    type: application
+    platform: iOS
+    sources: [CodexGuardianPhone]
+    dependencies:
+      - package: CodexGuardian
+        product: GuardianPhoneCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.moni.codexguardian.phone
+        PRODUCT_NAME: Codex Guardian
+        PRODUCT_MODULE_NAME: CodexGuardianPhone
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Codex Guardian
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: Connect to your paired Mac to monitor and recover Codex tasks.
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
+  CodexGuardianPhoneTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [CodexGuardianPhoneTests]
+    dependencies:
+      - target: CodexGuardianPhone
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.moni.codexguardian.phone.tests
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Codex Guardian.app/Codex Guardian"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
+schemes:
+  CodexGuardianPhone:
+    build:
+      targets:
+        CodexGuardianPhone: all
+    test:
+      targets:
+        - CodexGuardianPhoneTests

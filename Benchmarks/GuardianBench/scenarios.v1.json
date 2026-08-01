@@ -1,0 +1,9 @@
+{
+  "frozenRevision" : "guardianbench-v1",
+  "scenarios" : [
+    { "id" : "classifier-stale-evidence-fails-closed", "seedOffset" : 101, "severity" : "critical", "support" : "supported", "trialCount" : 100 },
+    { "id" : "wrong-thread-continuation-rejected", "seedOffset" : 202, "severity" : "critical", "support" : "supported", "trialCount" : 100 },
+    { "id" : "live-lan-tls-reconnect", "seedOffset" : 303, "severity" : "high", "support" : "not_available", "trialCount" : 100 }
+  ],
+  "schemaVersion" : 1
+}
